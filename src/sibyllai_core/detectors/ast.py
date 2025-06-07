@@ -1,31 +1,29 @@
-"Speech/Music segmentation via inaSpeechSegmenter."
-from pathlib import Path
-import logging
-import soundfile as sf
-from inaSpeechSegmenter import Segmenter
+"Audio-Spectrogram-Transformer music probability helper."
+import torch
+import librosa
+from transformers import (
+    AutoProcessor,
+    AutoModelForAudioClassification,
+)
 
-__all__ = ["detect_music_regions"]
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-_segmenter = Segmenter()           # heavy → load once
+_proc  = AutoProcessor.from_pretrained(
+    "MIT/ast-finetuned-audioset-10-10-0.4593"
+)
+_model = AutoModelForAudioClassification.from_pretrained(
+    "MIT/ast-finetuned-audioset-10-10-0.4593"
+).to(DEVICE)
+_music_idx = _model.config.label2id["Music"]
 
 
-def detect_music_regions(wav_path: str | Path):
-    """
-    Return list[(start_sec, end_sec)] that are music according to inaSpeech.
-    Falls back to a single full-length region when the package crashes on
-    “empty energy” edge-case.
-    """
-    wav_path = str(wav_path)
-    try:
-        regions = [
-            (start, end)
-            for lab, start, end in _segmenter(wav_path) if lab == "music"
-        ]
-    except TypeError:  # “arrays to stack must be passed …” bug
-        dur = sf.info(wav_path).duration
-        logging.warning(
-            "inaSpeechSegmenter failed; using full-length region instead."
-        )
-        regions = [(0.0, dur)]
+def music_probability(chunk, sr: int) -> float:
+    "Return probability [0-1] that *chunk* is music."
+    if sr != 16_000:
+        chunk = librosa.resample(y=chunk, orig_sr=sr, target_sr=16_000)
+        sr = 16_000
 
-    return regions
+    ins   = _proc(chunk, sampling_rate=sr, return_tensors="pt", padding=True)
+    ins   = {k: v.to(DEVICE) for k, v in ins.items()}
+    logits = _model(**ins).logits
+    return torch.sigmoid(logits)[0, _music_idx].item()

@@ -1,2 +1,50 @@
+# Python
 .venv/
+venv/
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Build
+*.egg-info/
+dist/
+build/
+
+# OS/Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Model weights, checkpoints, and large data
+src/sibyllai_core/thirdparty/music2emo/saved_models/
+src/sibyllai_core/thirdparty/music2emo/inference/data/*.pt
+src/sibyllai_core/thirdparty/music2emo/inference/data/*.ckpt
+src/sibyllai_core/thirdparty/music2emo/inference/input/
+src/sibyllai_core/thirdparty/music2emo/inference/temp_out/
+
+# Temporary, output, and log files
+*.log
+*.tmp
+*.out
+*.bak
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Datasets (ignore all except README)
+src/sibyllai_core/thirdparty/music2emo/dataset/*/
+!src/sibyllai_core/thirdparty/music2emo/dataset/*/README.md
+
+# Miscellaneous binaries
+*.mp3
+*.wav
+*.npy
+*.npz
+*.h5
+*.pt
+*.ckpt
+*.pkl
+*.joblib
