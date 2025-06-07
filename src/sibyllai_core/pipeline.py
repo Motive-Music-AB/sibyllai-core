@@ -18,13 +18,24 @@ from .detectors import (
 
 def _extract_audio(src: str | Path) -> Path:
     "Return temp mono 44.1 kHz wav path extracted with ffmpeg."
+    if not shutil.which("ffmpeg"):
+        raise FileNotFoundError(
+            "ffmpeg not found. Please install ffmpeg and ensure it is in your PATH."
+        )
     tmp = Path(tempfile.mkdtemp(prefix="sibyllai_"))
     wav = tmp / "audio.wav"
-    subprocess.run(
-        ["ffmpeg", "-y", "-i", str(src), "-vn",
-         "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", str(wav)],
-        check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-    )
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", str(src), "-vn",
+             "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", str(wav)],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+    except subprocess.CalledProcessError as e:
+        # Log or include stderr in the exception message
+        # For now, relying on the default exception trace to include some info
+        # A more specific error message could be crafted here if needed:
+        # raise RuntimeError(f"ffmpeg failed with error: {e.stderr.decode()}") from e
+        raise  # Re-raise the original exception
     return wav
 
 
@@ -45,14 +56,16 @@ def _tc(sec: float, fps: int = 25) -> str:
 
 # ─── public API ────────────────────────────────────────────────────────────
 def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
-    out_dir = Path(out_dir); out_dir.mkdir(exist_ok=True)
+    out_dir = Path(out_dir); out_dir.mkdir(parents=True, exist_ok=True)
 
     wav = _extract_audio(src)
     y, sr = sf.read(str(wav))
 
     regions = detect_music_regions(wav)
     if not regions:
-        logging.warning("No music detected."); return
+        logging.warning("No music detected.")
+        print("INFO: No music regions were detected in the input file. No output files will be generated.")
+        return
 
     rows = []
     for start, end in regions:
