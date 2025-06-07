@@ -1,15 +1,121 @@
-# sibyllai-core
+# SibyllAI Core
 
-Audio-spotting & mood-analysis engine for Motive-AI.
+**Status: 🚧 Work in Progress — Not fully working yet!**
 
-## Dependencies and Environment Considerations
+This repository contains the core engine for Motive-AI, an audio-spotting and mood-analysis tool designed to assist with film-music spotting, emotion mapping, and intelligent cue suggestions. The project is under active development and is being refactored for improved modularity and maintainability. 
 
-This project relies on several large machine learning and audio processing libraries.
-Dependencies such as PyTorch, TensorFlow, Essentia, and their associated components can consume a significant amount of disk space (potentially several gigabytes).
+**Note:**
+- The codebase is not yet fully functional. Some features may be incomplete or broken.
+- Please check back for updates as development progresses.
 
-Users are advised to:
-- Ensure adequate disk space is available before starting the installation.
-- Maintain a stable internet connection during the installation process due to the size of the downloads.
-- Check the `pyproject.toml` file for specific Python version requirements (currently Python >=3.11) and a detailed list of all dependencies.
+---
 
-Setting up a virtual environment (e.g., using `venv` or `conda`) is highly recommended to manage dependencies and avoid conflicts with other Python projects.
+## Tech Stack
+- **Python 3.11+**
+- **PyTorch** (deep learning, model inference)
+- **TensorFlow & Keras** (legacy and some model support)
+- **Hydra** (configuration management)
+- **Gradio** (demo UI)
+- **Librosa, SoundFile, Essentia** (audio processing)
+- **pytorch-lightning** (training pipeline)
+- **Other ML/DS libraries:** scikit-learn, pandas, numpy, etc.
+
+## Project Structure
+```
+src/
+  sibyllai_core/
+    cli.py           # Command-line interface
+    pipeline.py      # Main analysis pipeline
+    detectors/       # Audio/music feature detectors (e.g., AST, CLAP, INA)
+    markers/         # Marker and export utilities
+    thirdparty/
+      music2emo/     # Integrated and modified Music2Emo package
+        ...          # (models, utils, configs, etc.)
+```
+- **examples/data/**: Example audio/video files for testing
+- **outputs/**: Default output directory for CLI results
+
+---
+
+## Detailed Code-Level Flow
+
+1. **CLI Entry**
+   - **File:** `src/sibyllai_core/cli.py`
+   - **Function:** `main()`
+   - **What it does:**
+     - Parses arguments with `build_parser()`
+     - Calls `analyse()` from `pipeline.py`
+     - Example:
+       ```python
+       def main(argv=None):
+           args = build_parser().parse_args(argv)
+           analyse(pathlib.Path(args.src), pathlib.Path(args.out), args.thr, args.fps)
+       ```
+
+2. **Pipeline Orchestration**
+   - **File:** `src/sibyllai_core/pipeline.py`
+   - **Function:** `analyse(src: Path, out: Path, thr: float, fps: int)`
+   - **What it does:**
+     - Loads the input file (audio/video)
+     - Calls detector modules (see below)
+     - Aggregates results
+     - Calls marker/export utilities
+     - Writes output files to `out` directory
+
+3. **Detectors**
+   - **Folder:** `src/sibyllai_core/detectors/`
+   - **Files/Functions:**
+     - `ast.py` — e.g., `ASTDetector.analyse()`
+     - `clap.py` — e.g., `CLAPDetector.analyse()`
+     - `ina.py` — e.g., `INADetector.analyse()`
+     - `m2e_wrapper.py` — e.g., `global_moods()`
+   - **What they do:**
+     - Each provides a function or class to analyze the input and return features or predictions.
+
+4. **Music2Emo Integration**
+   - **File:** `src/sibyllai_core/detectors/m2e_wrapper.py`
+   - **Function:** `global_moods(wav_path: str, threshold: float = 0.5)`
+   - **What it does:**
+     - Instantiates `Music2emo` from `thirdparty/music2emo/music2emo.py`
+     - Calls `.predict()` on the input file
+     - Returns a dictionary with valence, arousal, and mood tags
+
+5. **Music2Emo Model**
+   - **File:** `src/sibyllai_core/thirdparty/music2emo/music2emo.py`
+   - **Class:** `Music2emo`
+   - **Function:** `predict(audio: str, threshold: float = 0.5) -> dict`
+   - **What it does:**
+     - Loads model weights
+     - Extracts features from audio
+     - Runs inference and returns predictions
+
+6. **Markers and Export**
+   - **File:** `src/sibyllai_core/markers/export.py`
+   - **Function:** e.g., `export_markers(results, out_path)`
+   - **What it does:**
+     - Takes results from detectors/pipeline
+     - Writes marker files or other outputs
+
+7. **Output**
+   - **Directory:** `outputs/` (or as specified by `--out`)
+   - **What's written:**
+     - Marker files, analysis results, logs, etc.
+
+---
+
+## Visual Flowchart (Mermaid)
+
+```mermaid
+flowchart TD
+    CLI["cli.py<br/>main()"] -->|parse args| Pipeline["pipeline.py<br/>analyse()"]
+    Pipeline -->|calls| AST["detectors/ast.py<br/>ASTDetector.analyse()"]
+    Pipeline -->|calls| CLAP["detectors/clap.py<br/>CLAPDetector.analyse()"]
+    Pipeline -->|calls| INA["detectors/ina.py<br/>INADetector.analyse()"]
+    Pipeline -->|calls| M2E["detectors/m2e_wrapper.py<br/>global_moods()"]
+    M2E -->|calls| Music2Emo["thirdparty/music2emo/music2emo.py<br/>Music2emo.predict()"]
+    Pipeline -->|calls| Markers["markers/export.py<br/>export_markers()"]
+    Pipeline -->|writes| Output["outputs/<br/>(results, markers, etc.)"]
+    CLI -->|input| Examples["examples/data/<br/>short_clip.wav"]
+```
+
+---
