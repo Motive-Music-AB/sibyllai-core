@@ -48,3 +48,4 @@ src/sibyllai_core/thirdparty/music2emo/dataset/*/
 *.ckpt
 *.pkl
 *.joblib
+*.mov
