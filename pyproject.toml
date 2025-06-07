@@ -145,6 +145,7 @@ dependencies = [
     "tifffile==2025.5.26",
     "tokenizers==0.21.1",
     "tomlkit==0.13.2",
+   # torch==2.2.2  # Do not upgrade due to compatibility; see README for security notice
     "torch==2.2.2",
     "torchaudio==2.2.2",
     "torchlibrosa==0.1.0",

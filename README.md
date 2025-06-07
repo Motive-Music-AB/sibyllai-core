@@ -119,3 +119,16 @@ flowchart TD
 ```
 
 ---
+
+## ⚠️ Security Notice: PyTorch Version
+
+This project currently pins `torch==2.2.2` due to compatibility requirements with other dependencies.
+
+- **Known vulnerability:** Remote Code Execution (RCE) via `torch.load` with `weights_only=True` (CVE-2025-32434).
+- **Mitigation:**
+  - **Do NOT load untrusted model files** using `torch.load`.
+  - Avoid using `weights_only=True` with files from untrusted sources.
+  - Only use model files you have created or that come from trusted sources.
+
+We will upgrade to a patched version as soon as compatibility allows.
+See [GitHub security advisory](https://github.com/pytorch/pytorch/security/advisories/GHSA-53qg-r3pm-6pq6) for more details.
