@@ -38,6 +38,7 @@ def gather_all_results(tensor):
 log = logging.getLogger(__name__)
 class MusicClassifier(pl.LightningModule):
     def __init__(self, cfg: DictConfig, output_file = None):
+        print("=== MusicClassifier __init__ called ===")
         super(MusicClassifier, self).__init__()
         self.cfg = cfg
         self.encoder = cfg.model.encoder

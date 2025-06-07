@@ -137,6 +137,7 @@ class bi_directional_self_attention_layers(nn.Module):
 
 class BTC_model(nn.Module):
     def __init__(self, config):
+        print("=== BTC_model __init__ called ===")
         super(BTC_model, self).__init__()
 
         self.timestep = config['timestep']

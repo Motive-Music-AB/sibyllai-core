@@ -13,6 +13,7 @@ class FeatureExtractorMERT:
     def __init__(self, model_name: str = "m-a-p/MERT-v1-95M",
                  device: str | torch.device | None = None,
                  sr: int = 24_000) -> None:
+        print("=== FeatureExtractorMERT __init__ called ===")
         self.sr   = sr
         self.name = model_name
 

@@ -24,6 +24,7 @@ class FeedforwardModelMTAttnCK(nn.Module):
     def __init__(self, input_size, output_size_classification, output_size_regression, nhead=8, num_layers=1, dropout_rate=0.1, 
                  num_key = 2, num_chords=158, num_chords_root=14, num_chords_attr=14, 
                  key_emb_dim=4, chord_emb_dim=8, chord_root_emb_dim=4, chord_attr_emb_dim=4):
+        print("=== FeedforwardModelMTAttnCK __init__ called ===")
         super().__init__()
         self.d_model = 512
 

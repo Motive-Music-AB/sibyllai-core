@@ -1,17 +1,20 @@
 "LAION-CLAP tag similarity helper."
 import numpy as np
 import librosa
-import laion_clap
 
-_clap = laion_clap.CLAP_Module(enable_fusion=False)
-_clap.load_ckpt()
+_clap = None
 _TAGS = ["rock", "classical", "contains speech", "lo-fi", "orchestral"]
-
 
 def tag_chunk(chunk, sr: int) -> dict[str, float]:
     """
     Return {tag: similarity} for a small fixed tag list.
     """
+    global _clap
+    if _clap is None:
+        import laion_clap
+        _clap = laion_clap.CLAP_Module(enable_fusion=False)
+        _clap.load_ckpt()
+
     if sr != 48_000:
         chunk = librosa.resample(y=chunk, orig_sr=sr, target_sr=48_000)
         sr = 48_000

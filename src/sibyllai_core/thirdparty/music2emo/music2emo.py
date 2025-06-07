@@ -72,6 +72,7 @@ def split_audio(wav:torch.Tensor, sr:int)->List[torch.Tensor]:
 # ────────────────────────────────────────────────────────────────────────────
 class Music2emo:
     def __init__(self, model_weights:str="saved_models/J_all.ckpt"):
+        print("=== Music2emo __init__ called ===")
         self.device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         root = Path(__file__).resolve().parent

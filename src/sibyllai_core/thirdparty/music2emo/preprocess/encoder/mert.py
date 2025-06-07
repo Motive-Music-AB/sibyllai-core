@@ -4,6 +4,7 @@ from transformers import Wav2Vec2FeatureExtractor, AutoModel
 
 class FeatureExtractorMERT:
     def __init__(self, model_name="m-a-p/MERT-v1-95M", device_id=0, sr=24000):
+        print("=== FeatureExtractorMERT __init__ called ===")
         self.model_name = model_name
         self.device_id = device_id
         self.sr = sr
