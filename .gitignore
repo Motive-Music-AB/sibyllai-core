@@ -49,3 +49,5 @@ src/sibyllai_core/thirdparty/music2emo/dataset/*/
 *.pkl
 *.joblib
 *.mov
+.DS_Store
+.cursor/
