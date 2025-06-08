@@ -17,6 +17,8 @@ This repository contains the core engine for Motive-AI, an audio-spotting and mo
 - **Hydra** (configuration management)
 - **Gradio** (demo UI)
 - **Librosa, SoundFile, Essentia** (audio processing)
+- **YAMNet** (music/speech segmentation)
+- **Demucs** (music source separation, experimental)
 - **pytorch-lightning** (training pipeline)
 - **Other ML/DS libraries:** scikit-learn, pandas, numpy, etc.
 
@@ -26,7 +28,7 @@ src/
   sibyllai_core/
     cli.py           # Command-line interface
     pipeline.py      # Main analysis pipeline
-    detectors/       # Audio/music feature detectors (e.g., AST, CLAP, INA)
+    detectors/       # Audio/music feature detectors (e.g., AST, CLAP, YAMNet)
     markers/         # Marker and export utilities
     thirdparty/
       music2emo/     # Integrated and modified Music2Emo package
@@ -65,14 +67,17 @@ src/
 3. **Detectors**
    - **Folder:** `src/sibyllai_core/detectors/`
    - **Files/Functions:**
+     - `yamnet_segmenter.py` — e.g., `YAMNetSegmenter.analyse()` (music/speech segmentation)
      - `ast.py` — e.g., `ASTDetector.analyse()`
      - `clap.py` — e.g., `CLAPDetector.analyse()`
-     - `ina.py` — e.g., `INADetector.analyse()`
      - `m2e_wrapper.py` — e.g., `global_moods()`
    - **What they do:**
      - Each provides a function or class to analyze the input and return features or predictions.
 
-4. **Music2Emo Integration**
+4. **Source Separation (Experimental)**
+   - **Demucs** is used to separate music from other stems before mood analysis. This step is experimental and may not be fully stable yet.
+
+5. **Music2Emo Integration**
    - **File:** `src/sibyllai_core/detectors/m2e_wrapper.py`
    - **Function:** `global_moods(wav_path: str, threshold: float = 0.5)`
    - **What it does:**
@@ -80,7 +85,7 @@ src/
      - Calls `.predict()` on the input file
      - Returns a dictionary with valence, arousal, and mood tags
 
-5. **Music2Emo Model**
+6. **Music2Emo Model**
    - **File:** `src/sibyllai_core/thirdparty/music2emo/music2emo.py`
    - **Class:** `Music2emo`
    - **Function:** `predict(audio: str, threshold: float = 0.5) -> dict`
@@ -89,14 +94,14 @@ src/
      - Extracts features from audio
      - Runs inference and returns predictions
 
-6. **Markers and Export**
+7. **Markers and Export**
    - **File:** `src/sibyllai_core/markers/export.py`
    - **Function:** e.g., `export_markers(results, out_path)`
    - **What it does:**
      - Takes results from detectors/pipeline
      - Writes marker files or other outputs
 
-7. **Output**
+8. **Output**
    - **Directory:** `outputs/` (or as specified by `--out`)
    - **What's written:**
      - Marker files, analysis results, logs, etc.
@@ -108,9 +113,10 @@ src/
 ```mermaid
 flowchart TD
     CLI["cli.py<br/>main()"] -->|parse args| Pipeline["pipeline.py<br/>analyse()"]
+    Pipeline -->|calls| YAMNet["detectors/yamnet_segmenter.py<br/>YAMNetSegmenter.analyse()"]
     Pipeline -->|calls| AST["detectors/ast.py<br/>ASTDetector.analyse()"]
     Pipeline -->|calls| CLAP["detectors/clap.py<br/>CLAPDetector.analyse()"]
-    Pipeline -->|calls| INA["detectors/ina.py<br/>INADetector.analyse()"]
+    Pipeline -->|calls| Demucs["demucs<br/>(source separation, experimental)"]
     Pipeline -->|calls| M2E["detectors/m2e_wrapper.py<br/>global_moods()"]
     M2E -->|calls| Music2Emo["thirdparty/music2emo/music2emo.py<br/>Music2emo.predict()"]
     Pipeline -->|calls| Markers["markers/export.py<br/>export_markers()"]

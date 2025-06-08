@@ -27,7 +27,7 @@ dependencies = [
     "decorator==5.2.1",
     "docker-pycreds==0.4.0",
     "docopt==0.6.2",
-    "essentia==2.1b6.dev1110",
+    "essentia>=2.1b5",
     "essentia-tensorflow==2.1b6.dev1110",
     "fastapi==0.115.12",
     "ffmpy==0.5.0",
@@ -169,7 +169,9 @@ dependencies = [
     "wrapt==1.17.2",
     "xarray==2025.4.0",
     "yarl==1.20.0",
-    "nnAudio==0.3.3"
+    "nnAudio==0.3.3",
+    "diffq",
+    "demucs==4.0.1"
 ]
 
 [project.optional-dependencies]
