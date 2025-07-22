@@ -38,6 +38,8 @@ def _extract_audio(src: str | Path) -> Path:
             check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
     except subprocess.CalledProcessError as e:
+        # Clean up temp directory on failure
+        shutil.rmtree(tmp, ignore_errors=True)
         raise
     return wav
 
@@ -74,8 +76,11 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
 
     # 1. Extract audio from input (video or audio file)
     wav = _extract_audio(src)
+    wav_temp_dir = wav.parent  # Store reference for cleanup
     print(f"[DEBUG] Extracted WAV path: {wav}")
-    y, sr = sf.read(str(wav))
+    
+    try:
+        y, sr = sf.read(str(wav))
 
     # 2. Segment music regions using YAMNet
     music_regions = segment_music_regions(wav)
@@ -166,6 +171,8 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
     df.to_csv(get_incremental_path(out_dir, "music_segments.csv"), index=False)
     logging.info("Music segments saved → %s", out_dir / "music_segments.csv")
 
-    # 5. Copy the extracted WAV to outputs for inspection
-    shutil.copy(str(wav), str(Path(out_dir) / "audio_debug.wav"))
-    shutil.rmtree(wav.parent, ignore_errors=True)
+        # 5. Copy the extracted WAV to outputs for inspection
+        shutil.copy(str(wav), str(Path(out_dir) / "audio_debug.wav"))
+    finally:
+        # Always clean up temporary directory
+        shutil.rmtree(wav_temp_dir, ignore_errors=True)

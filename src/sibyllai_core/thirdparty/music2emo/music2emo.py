@@ -87,7 +87,7 @@ class Music2emo:
 
         # mood / val-aro model
         self.mood_model = FeedforwardModelMTAttnCK(1536,56,2)
-        ckpt=torch.load(self.ckpt_mood,map_location="cpu")["state_dict"]
+        ckpt=torch.load(self.ckpt_mood,map_location="cpu",weights_only=True)["state_dict"]
         self.mood_model.load_state_dict(
             {k.replace("model.",""):v for k,v in ckpt.items()
              if k.replace("model.","") in self.mood_model.state_dict()}
@@ -97,7 +97,7 @@ class Music2emo:
         # BTC chord model (+ meta)
         self.hp        = HParams.load(self.hparams)
         self.btc       = BTC_model(config=self.hp.model).to(self.device).eval()
-        btc_sd         = torch.load(self.ckpt_btc,map_location="cpu")
+        btc_sd         = torch.load(self.ckpt_btc,map_location="cpu",weights_only=True)
         self.btc.load_state_dict(btc_sd["model"])
         self.btc_mean, self.btc_std = btc_sd["mean"], btc_sd["std"]
         self.n_timestep = self.hp.model["timestep"]   # == 108
@@ -154,8 +154,16 @@ class Music2emo:
 
         # 2) chord ids (root/attr simplified = same ids) --------------------
         btc_chord_ids = self._btc_chord_sequence(audio)
-        mapped_chord_ids = [idx % 14 for idx in btc_chord_ids]
+        # Ensure chord IDs are non-negative and within bounds
+        mapped_chord_ids = [max(0, min(abs(idx) % 14, 13)) for idx in btc_chord_ids]
         chord_ids = torch.tensor(mapped_chord_ids, dtype=torch.long, device=self.device)
+        
+        # Validate bounds against actual embedding layer
+        max_chord_idx = self.mood_model.chord_root_embedding.num_embeddings - 1
+        if chord_ids.max().item() > max_chord_idx:
+            # Clamp values to valid range if somehow they exceed bounds
+            chord_ids = torch.clamp(chord_ids, 0, max_chord_idx)
+            
         print(f"chord_ids min: {chord_ids.min().item()}, max: {chord_ids.max().item()}, shape: {chord_ids.shape}")
         print(f"mood_model.chord_root_embedding.num_embeddings: {self.mood_model.chord_root_embedding.num_embeddings}")
         mode      = torch.zeros((1,1),dtype=torch.long,device=self.device) # major

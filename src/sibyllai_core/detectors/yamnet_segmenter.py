@@ -30,7 +30,12 @@ def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0):
     class_map_path = os.path.join(os.path.dirname(__file__), "yamnet_class_map.csv")
     if not os.path.exists(class_map_path):
         import urllib.request
-        urllib.request.urlretrieve(class_map_url, class_map_path)
+        import ssl
+        # Create secure SSL context and validate URL
+        if not class_map_url.startswith('https://'):
+            raise ValueError("Only HTTPS URLs are allowed for security")
+        ssl_context = ssl.create_default_context()
+        urllib.request.urlretrieve(class_map_url, class_map_path, context=ssl_context)
     class_names = pd.read_csv(class_map_path)["display_name"].tolist()
     music_idx = class_names.index("Music")
     # Load audio

@@ -105,7 +105,7 @@ class MusicClassifier(pl.LightningModule):
                     )
                     
                     # Load the checkpoint
-                    checkpoint = torch.load(teacher_model_path, map_location=self.device, weights_only=False)
+                    checkpoint = torch.load(teacher_model_path, map_location=self.device, weights_only=True)
                     state_dict = checkpoint["state_dict"]
                     
                     # Adjust the keys in the state_dict

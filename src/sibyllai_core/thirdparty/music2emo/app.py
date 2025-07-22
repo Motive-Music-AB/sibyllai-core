@@ -190,7 +190,7 @@ class Music2emo:
             output_size_regression=2
         )
 
-        checkpoint = torch.load(self.model_weights, map_location=self.device, weights_only=False)
+        checkpoint = torch.load(self.model_weights, map_location=self.device, weights_only=True)
         state_dict = checkpoint["state_dict"]
         
         # Adjust the keys in the state_dict
@@ -271,7 +271,7 @@ class Music2emo:
         model = BTC_model(config=config.model).to(self.device)
 
         if os.path.isfile(model_file):
-            checkpoint = torch.load(model_file)
+            checkpoint = torch.load(model_file, weights_only=True)
             mean = checkpoint['mean']
             std = checkpoint['std']
             model.load_state_dict(checkpoint['model'])
