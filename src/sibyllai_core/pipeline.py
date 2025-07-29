@@ -33,9 +33,9 @@ def _extract_audio(src: str | Path) -> Path:
     wav = tmp / "audio.wav"
     try:
         subprocess.run(
-            ["ffmpeg", "-y", "-i", str(src), "-vn",
+            ["ffmpeg", "-v", "error", "-y", "-i", str(src), "-vn",
              "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", str(wav)],
-            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
     except subprocess.CalledProcessError as e:
         raise
@@ -59,10 +59,22 @@ def _tc(sec: float, fps: int = 25) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}:{f:02d}"
 
 
+def get_incremental_run_folder(base_dir="outputs"):
+    base = Path(base_dir)
+    base.mkdir(exist_ok=True)
+    i = 1
+    while (base / f"run_{i:03d}").exists():
+        i += 1
+    run_dir = base / f"run_{i:03d}"
+    run_dir.mkdir()
+    return run_dir
+
+
 # ─── public API ────────────────────────────────────────────────────────────
 def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
     src = Path(src)
-    out_dir = Path(out_dir)
+    # Use incremental run folder
+    run_dir = get_incremental_run_folder()
     print("=== ENTERED analyse ===")
     print("=== ENTERED ANALYSE FUNCTION (DEBUG MARKER) ===")
     print(f"[DEBUG] Input file received: {src}")
@@ -70,7 +82,6 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
         print(f"[ERROR] File does not exist: {src}")
         return
     print(f"[DEBUG] File exists: {src}")
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Extract audio from input (video or audio file)
     wav = _extract_audio(src)
@@ -81,7 +92,6 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
     music_regions = segment_music_regions(wav)
     print(f"[DEBUG] Detected music regions: {music_regions}")
     if not music_regions:
-        logging.warning("No music detected.")
         print("INFO: No music regions were detected in the input file. No output files will be generated.")
         return
 
@@ -103,69 +113,146 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
             chunk = np.stack([chunk, chunk], axis=0)
         elif chunk.shape[0] == 1:
             chunk = np.vstack([chunk, chunk])
-        # Save as (n_samples, 2) for sf.write
         chunk = chunk.T
-        segment_wav_path = out_dir / f"segment_{i+1}.wav"
+        segment_wav_path = run_dir / f"segment_{i+1}.wav"
         sf.write(segment_wav_path, chunk, target_sr)
         print(f"[DEBUG] Segment {i+1}: {start:.2f}-{end:.2f}s, temp WAV: {segment_wav_path}")
-        # Run Demucs on the segment WAV
-        demucs_out_dir = out_dir / f"segment_{i+1}_demucs"
+        # Run Demucs in 4-stem mode
+        demucs_out_dir = run_dir / f"segment_{i+1}_demucs"
         demucs_out_dir.mkdir(exist_ok=True)
         try:
-            # Use Demucs CLI for robust file output
             subprocess.run([
-                "demucs", "--two-stems", "other", "-o", str(demucs_out_dir), str(segment_wav_path)
+                "demucs", "-o", str(demucs_out_dir), str(segment_wav_path)
             ], check=True)
-            # Demucs outputs to demucs_out_dir/demucs/segment_{i+1}/other.wav
             demucs_stem_dir = demucs_out_dir / "htdemucs" / segment_wav_path.stem
-            other_stem_path = demucs_stem_dir / "other.wav"
-            if not other_stem_path.exists():
-                # Try 'accompaniment.wav' as fallback
-                other_stem_path = demucs_stem_dir / "accompaniment.wav"
-            if not other_stem_path.exists():
-                print(f"[WARNING] Demucs did not produce an 'other' or 'accompaniment' stem for segment {i+1}.")
+            required_stems = ["drums.wav", "bass.wav", "other.wav"]
+            missing = [stem for stem in required_stems if not (demucs_stem_dir / stem).exists()]
+            if missing:
+                print(f"[WARNING] Demucs missing stems for segment {i+1}: {missing}")
                 continue
-            # Load the separated music stem
-            stem_chunk, stem_sr = sf.read(str(other_stem_path))
-            if stem_sr != sr:
-                stem_chunk = librosa.resample(stem_chunk, orig_sr=stem_sr, target_sr=sr)
-            # Use the separated music stem for all detectors
-            prob = music_probability(stem_chunk, sr)
-            tags = tag_chunk(stem_chunk, sr)
-            bpm = _bpm_track(stem_chunk, sr)
-            rows.append({
-                "start": start,
-                "end": end,
-                "prob": prob,
-                "tags": tags,
-                "bpm": bpm,
-            })
-            # Use the separated music stem for mood detection
+            # Load and combine stems
             try:
-                mood_result = global_moods(str(other_stem_path))
+                drums, sr2 = sf.read(demucs_stem_dir / "drums.wav")
+                bass, _ = sf.read(demucs_stem_dir / "bass.wav")
+                other, _ = sf.read(demucs_stem_dir / "other.wav")
+                min_len = min(len(drums), len(bass), len(other))
+                drums = drums[:min_len]
+                bass = bass[:min_len]
+                other = other[:min_len]
+                music = drums + bass + other
+                max_val = np.max(np.abs(music))
+                if max_val > 1.0:
+                    music = music / max_val
+                music_path = run_dir / f"segment_{i+1}_music_minus_vocals.wav"
+                sf.write(music_path, music, sr2)
+                print(f"[INFO] Combined music-minus-vocals stem saved as: {music_path}")
             except Exception as e:
-                print(f"[WARNING] music2emo failed for segment {i+1}: {e}")
-                print(f"[WARNING] Segment WAV kept for inspection: {other_stem_path}")
+                print(f"[ERROR] Could not combine stems for segment {i+1}: {e}")
                 continue
-            json_path = out_dir / f"mood_segment_{i+1}.json"
-            with open(json_path, "w") as f:
-                json.dump(mood_result, f, indent=2)
+            # Clean up Demucs output folder
+            shutil.rmtree(demucs_out_dir, ignore_errors=True)
+            # Clean up temp segment wav
+            if segment_wav_path.exists():
+                segment_wav_path.unlink()
+            # Analyze the music segment for additional features
+            try:
+                # Ensure audio is mono and has sufficient length
+                if music.ndim > 1:
+                    music_mono = librosa.to_mono(music.T)
+                else:
+                    music_mono = music
+                
+                # Ensure minimum length for analysis (at least 1 second)
+                min_samples = sr2
+                if len(music_mono) < min_samples:
+                    print(f"[WARNING] Segment {i+1} too short for analysis ({len(music_mono)} samples)")
+                    raise ValueError("Audio too short for analysis")
+                
+                # Initialize analysis variables
+                bpm = "Unknown"
+                moods_str = "Unknown"
+                valence = 0.0
+                arousal = 0.0
+                music_prob = 0.0
+                clap_str = "Unknown"
+                
+                # BPM analysis
+                try:
+                    bpm = _bpm_track(music_mono, sr2)
+                except Exception as e:
+                    print(f"[WARNING] BPM analysis failed for segment {i+1}: {e}")
+                
+                # Music probability (using AST detector) - more robust
+                try:
+                    music_prob = music_probability(music_mono, sr2)
+                except Exception as e:
+                    print(f"[WARNING] Music probability analysis failed for segment {i+1}: {e}")
+                
+                # CLAP tags for music characteristics
+                try:
+                    clap_tags = tag_chunk(music_mono, sr2)
+                    # Filter out speech-related tags since we already remove vocals
+                    filtered_clap = {k: v for k, v in clap_tags.items() 
+                                   if 'speech' not in k.lower() and 'voice' not in k.lower() and 'contains speech' not in k.lower()}
+                    top_clap_tags = sorted(filtered_clap.items(), key=lambda x: x[1], reverse=True)[:5]
+                    clap_str = ", ".join([f"{tag}:{prob:.2f}" for tag, prob in top_clap_tags])
+                except Exception as e:
+                    print(f"[WARNING] CLAP analysis failed for segment {i+1}: {e}")
+                
+                # Mood analysis using Music2Emotion - most fragile, try last
+                try:
+                    mood_result = global_moods(str(music_path), threshold=thr)
+                    
+                    # Extract top mood predictions
+                    predicted_moods = mood_result.get('moods', [])
+                    top_moods = predicted_moods[:3] if predicted_moods else []
+                    moods_str = ", ".join(top_moods) if top_moods else "Unknown"
+                    
+                    # Extract valence and arousal
+                    valence = mood_result.get('valence', 0.0)
+                    arousal = mood_result.get('arousal', 0.0)
+                except Exception as e:
+                    print(f"[WARNING] Music2Emotion analysis failed for segment {i+1}: {e}")
+                
+                rows.append({
+                    "Start": start,
+                    "End": end,
+                    "Length": end - start,
+                    "File": f"segment_{i+1}_music_minus_vocals.wav",
+                    "BPM": round(bpm, 1) if bpm else "Unknown",
+                    "Moods": moods_str,
+                    "Valence": round(valence, 3),
+                    "Arousal": round(arousal, 3),
+                    "Music_Probability": round(music_prob, 3),
+                    "CLAP_Tags": clap_str
+                })
+            except Exception as e:
+                print(f"[WARNING] Music analysis failed for segment {i+1}: {e}")
+                # Fallback to basic info if analysis fails
+                rows.append({
+                    "Start": start,
+                    "End": end,
+                    "Length": end - start,
+                    "File": f"segment_{i+1}_music_minus_vocals.wav",
+                    "BPM": "Unknown",
+                    "Moods": "Unknown",
+                    "Valence": 0.0,
+                    "Arousal": 0.0,
+                    "Music_Probability": 0.0,
+                    "CLAP_Tags": "Unknown"
+                })
         except Exception as e:
             print(f"[WARNING] Demucs failed for segment {i+1}: {e}")
-            print(f"[WARNING] Segment WAV kept for inspection: {segment_wav_path}")
             continue
 
-    # 4. Save per-segment results to CSV
-    df = pd.DataFrame(
-        [[_tc(r["start"], fps), _tc(r["end"], fps), _tc(r["end"]-r["start"], fps),
-          f'{r["prob"]:.2f}', f'{r["bpm"]:.2f}',
-          ", ".join(f"{k}:{v:.2f}" for k, v in r["tags"].items() if "speech" not in k.lower())]
-         for r in rows],
-        columns=["Start", "End", "Length", "MusicProb", "BPM", "Tags"],
-    )
-    df.to_csv(get_incremental_path(out_dir, "music_segments.csv"), index=False)
-    logging.info("Music segments saved → %s", out_dir / "music_segments.csv")
+    # 4. Save per-segment results to CSV in run_dir
+    if rows:
+        df = pd.DataFrame(rows)
+        df.to_csv(run_dir / "music_segments.csv", index=False)
+        print(f"[INFO] Output written to {run_dir}")
+    else:
+        print("[INFO] No valid segments to output.")
 
-    # 5. Copy the extracted WAV to outputs for inspection
-    shutil.copy(str(wav), str(Path(out_dir) / "audio_debug.wav"))
-    shutil.rmtree(wav.parent, ignore_errors=True)
+    # Clean up extracted audio
+    if wav.exists():
+        wav.unlink()

@@ -1,5 +1,6 @@
 import os
 import subprocess
+import tempfile
 import numpy as np
 import tensorflow as tf
 import tensorflow_hub as hub
@@ -21,7 +22,9 @@ def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0):
     """
     Returns a list of (start_time, end_time) tuples for detected music regions in the audio file.
     """
-    temp_wav = "temp_extracted.wav"
+    tmp_handle = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+    temp_wav = tmp_handle.name
+    tmp_handle.close()
     wav_path = extract_audio(audio_path, temp_wav)
     yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
     # Load class map from the same directory as this file

@@ -21,5 +21,8 @@ def tag_chunk(chunk, sr: int) -> dict[str, float]:
 
     emb  = _clap.get_audio_embedding_from_data(chunk.reshape(1, -1))[0]
     temb = _clap.get_text_embedding(_TAGS)
-    sims = (emb @ temb.T) / (np.linalg.norm(emb) * np.linalg.norm(temb, axis=1))
+    eps = 1e-8
+    audio_norm = np.linalg.norm(emb) + eps
+    text_norms = np.linalg.norm(temb, axis=1) + eps
+    sims = (emb @ temb.T) / (audio_norm * text_norms)
     return dict(zip(_TAGS, sims))
