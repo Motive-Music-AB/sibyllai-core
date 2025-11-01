@@ -11,7 +11,7 @@ import soundfile as sf
 import librosa
 import essentia.standard as es
 
-from .detectors.yamnet_segmenter import segment_music_regions
+from .detectors.yamnet_segmenter import segment_music_regions, extract_instruments
 from .detectors.chord_detector import analyze_chords  # For key detection only
 from .output import get_incremental_path
 from .detectors import (
@@ -126,7 +126,9 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
             valence = 0.0
             arousal = 0.0
             music_prob = 0.0
-            clap_str = "Unknown"
+            clap_categorized = {}
+            clap_top_overall = []
+            instruments = {}
 
             # BPM analysis
             try:
@@ -134,20 +136,33 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
             except Exception as e:
                 print(f"[WARNING] BPM analysis failed for segment {i+1}: {e}")
 
+            # Instrument detection via YAMNet
+            try:
+                instruments = extract_instruments(music_mono, sr=sr, top_n=5)
+            except Exception as e:
+                print(f"[WARNING] Instrument extraction failed for segment {i+1}: {e}")
+
             # Music probability (using AST detector) - more robust
             try:
                 music_prob = music_probability(music_mono, sr)
             except Exception as e:
                 print(f"[WARNING] Music probability analysis failed for segment {i+1}: {e}")
 
-            # CLAP tags for music characteristics
+            # CLAP tags for music characteristics (categorized structure)
             try:
-                clap_tags = tag_chunk(music_mono, sr)
-                # Filter out speech-related tags
-                filtered_clap = {k: v for k, v in clap_tags.items()
-                               if 'speech' not in k.lower() and 'voice' not in k.lower() and 'contains speech' not in k.lower()}
-                top_clap_tags = sorted(filtered_clap.items(), key=lambda x: x[1], reverse=True)[:5]
-                clap_str = ", ".join([f"{tag}:{prob:.2f}" for tag, prob in top_clap_tags])
+                clap_categorized = tag_chunk(music_mono, sr)
+
+                # Extract top tags per category for summary
+                top_tags = []
+                for category, tags in clap_categorized.items():
+                    sorted_tags = sorted(tags.items(), key=lambda x: x[1], reverse=True)
+                    # Get top 2 per category
+                    for tag, score in sorted_tags[:2]:
+                        top_tags.append((tag, score, category))
+
+                # Sort all top tags by score and take top 5 overall
+                clap_top_overall = sorted(top_tags, key=lambda x: x[1], reverse=True)[:5]
+
             except Exception as e:
                 print(f"[WARNING] CLAP analysis failed for segment {i+1}: {e}")
 
@@ -182,17 +197,28 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
             except Exception as e:
                 print(f"[WARNING] Music2Emotion analysis failed for segment {i+1}: {e}")
 
+            # Format CLAP tags for CSV output (temporary until JSON export)
+            clap_summary = ", ".join([f"{tag} ({cat}): {score:.2f}"
+                                      for tag, score, cat in clap_top_overall]) if clap_top_overall else "Unknown"
+
+            # Format instruments for CSV output
+            instruments_summary = ", ".join([f"{name}: {score:.2f}"
+                                            for name, score in instruments.items()]) if instruments else "Unknown"
+
             rows.append({
                 "Start": start,
                 "End": end,
                 "Length": end - start,
-                "BPM": round(bpm, 1) if bpm else "Unknown",
+                "BPM": round(bpm, 1) if bpm != "Unknown" else "Unknown",
                 "Key": detected_key,
+                "Instruments": instruments_summary,
+                "Instruments_Data": json.dumps(instruments) if instruments else "{}",
                 "Moods": moods_str,
                 "Valence": round(valence, 3),
                 "Arousal": round(arousal, 3),
                 "Music_Probability": round(music_prob, 3),
-                "CLAP_Tags": clap_str
+                "CLAP_Top_Tags": clap_summary,
+                "CLAP_Full_Data": json.dumps(clap_categorized) if clap_categorized else "{}"
             })
         except Exception as e:
             print(f"[WARNING] Music analysis failed for segment {i+1}: {e}")
@@ -203,11 +229,14 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
                 "Length": end - start,
                 "BPM": "Unknown",
                 "Key": "Unknown",
+                "Instruments": "Unknown",
+                "Instruments_Data": "{}",
                 "Moods": "Unknown",
                 "Valence": 0.0,
                 "Arousal": 0.0,
                 "Music_Probability": 0.0,
-                "CLAP_Tags": "Unknown"
+                "CLAP_Top_Tags": "Unknown",
+                "CLAP_Full_Data": "{}"
             })
 
     # 4. Save per-segment results to CSV in run_dir
