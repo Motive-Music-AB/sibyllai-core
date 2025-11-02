@@ -1,26 +1,27 @@
 "High-level spotting pipeline."
 from __future__ import annotations
+import json
 import os
-print("=== PIPELINE MODULE LOADED FROM:", os.path.abspath(__file__), "===")
-import json, shutil, subprocess, tempfile, logging
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pandas as pd
-import numpy as np
 import soundfile as sf
 import librosa
 import essentia.standard as es
-from demucs.pretrained import get_model
-from demucs.apply import apply_model
-import torchaudio
 
-from .detectors.yamnet_segmenter import segment_music_regions
-from .output import get_incremental_path
+from .detectors.yamnet_segmenter import segment_music_regions, extract_instruments
+from .detectors.chord_detector import analyze_chords  # For key detection only
 from .detectors import (
     music_probability,
     tag_chunk,
 )
 from .detectors.m2e_wrapper import global_moods
+from .sibyl_format import create_cue, create_project, save_project
+
+print("=== PIPELINE MODULE LOADED FROM:", os.path.abspath(__file__), "===")
 
 def _extract_audio(src: str | Path) -> Path:
     print("=== ENTERED _extract_audio ===")
@@ -37,7 +38,7 @@ def _extract_audio(src: str | Path) -> Path:
              "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", str(wav)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         raise
     return wav
 
@@ -96,7 +97,8 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
         return
 
     # 3. For each region, extract audio and run detectors
-    rows = []
+    rows = []  # For backwards-compatible CSV
+    cues = []  # For new .sibyl JSON format
     min_duration = 3.0  # seconds
     for i, (start, end) in enumerate(music_regions):
         if (end - start) < min_duration:
@@ -105,151 +107,178 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
         start_sample = int(start * sr)
         end_sample = int(end * sr)
         chunk = y[start_sample:end_sample]
-        # Ensure chunk is stereo and 44.1kHz for Demucs
-        target_sr = 44100
-        if sr != target_sr:
-            chunk = librosa.resample(chunk, orig_sr=sr, target_sr=target_sr)
-        if chunk.ndim == 1:
-            chunk = np.stack([chunk, chunk], axis=0)
-        elif chunk.shape[0] == 1:
-            chunk = np.vstack([chunk, chunk])
-        chunk = chunk.T
-        segment_wav_path = run_dir / f"segment_{i+1}.wav"
-        sf.write(segment_wav_path, chunk, target_sr)
-        print(f"[DEBUG] Segment {i+1}: {start:.2f}-{end:.2f}s, temp WAV: {segment_wav_path}")
-        # Run Demucs in 4-stem mode
-        demucs_out_dir = run_dir / f"segment_{i+1}_demucs"
-        demucs_out_dir.mkdir(exist_ok=True)
-        try:
-            subprocess.run([
-                "demucs", "-o", str(demucs_out_dir), str(segment_wav_path)
-            ], check=True)
-            demucs_stem_dir = demucs_out_dir / "htdemucs" / segment_wav_path.stem
-            required_stems = ["drums.wav", "bass.wav", "other.wav"]
-            missing = [stem for stem in required_stems if not (demucs_stem_dir / stem).exists()]
-            if missing:
-                print(f"[WARNING] Demucs missing stems for segment {i+1}: {missing}")
-                continue
-            # Load and combine stems
-            try:
-                drums, sr2 = sf.read(demucs_stem_dir / "drums.wav")
-                bass, _ = sf.read(demucs_stem_dir / "bass.wav")
-                other, _ = sf.read(demucs_stem_dir / "other.wav")
-                min_len = min(len(drums), len(bass), len(other))
-                drums = drums[:min_len]
-                bass = bass[:min_len]
-                other = other[:min_len]
-                music = drums + bass + other
-                max_val = np.max(np.abs(music))
-                if max_val > 1.0:
-                    music = music / max_val
-                music_path = run_dir / f"segment_{i+1}_music_minus_vocals.wav"
-                sf.write(music_path, music, sr2)
-                print(f"[INFO] Combined music-minus-vocals stem saved as: {music_path}")
-            except Exception as e:
-                print(f"[ERROR] Could not combine stems for segment {i+1}: {e}")
-                continue
-            # Clean up Demucs output folder
-            shutil.rmtree(demucs_out_dir, ignore_errors=True)
-            # Clean up temp segment wav
-            if segment_wav_path.exists():
-                segment_wav_path.unlink()
-            # Analyze the music segment for additional features
-            try:
-                # Ensure audio is mono and has sufficient length
-                if music.ndim > 1:
-                    music_mono = librosa.to_mono(music.T)
-                else:
-                    music_mono = music
-                
-                # Ensure minimum length for analysis (at least 1 second)
-                min_samples = sr2
-                if len(music_mono) < min_samples:
-                    print(f"[WARNING] Segment {i+1} too short for analysis ({len(music_mono)} samples)")
-                    raise ValueError("Audio too short for analysis")
-                
-                # Initialize analysis variables
-                bpm = "Unknown"
-                moods_str = "Unknown"
-                valence = 0.0
-                arousal = 0.0
-                music_prob = 0.0
-                clap_str = "Unknown"
-                
-                # BPM analysis
-                try:
-                    bpm = _bpm_track(music_mono, sr2)
-                except Exception as e:
-                    print(f"[WARNING] BPM analysis failed for segment {i+1}: {e}")
-                
-                # Music probability (using AST detector) - more robust
-                try:
-                    music_prob = music_probability(music_mono, sr2)
-                except Exception as e:
-                    print(f"[WARNING] Music probability analysis failed for segment {i+1}: {e}")
-                
-                # CLAP tags for music characteristics
-                try:
-                    clap_tags = tag_chunk(music_mono, sr2)
-                    # Filter out speech-related tags since we already remove vocals
-                    filtered_clap = {k: v for k, v in clap_tags.items() 
-                                   if 'speech' not in k.lower() and 'voice' not in k.lower() and 'contains speech' not in k.lower()}
-                    top_clap_tags = sorted(filtered_clap.items(), key=lambda x: x[1], reverse=True)[:5]
-                    clap_str = ", ".join([f"{tag}:{prob:.2f}" for tag, prob in top_clap_tags])
-                except Exception as e:
-                    print(f"[WARNING] CLAP analysis failed for segment {i+1}: {e}")
-                
-                # Mood analysis using Music2Emotion - most fragile, try last
-                try:
-                    mood_result = global_moods(str(music_path), threshold=thr)
-                    
-                    # Extract top mood predictions
-                    predicted_moods = mood_result.get('moods', [])
-                    top_moods = predicted_moods[:3] if predicted_moods else []
-                    moods_str = ", ".join(top_moods) if top_moods else "Unknown"
-                    
-                    # Extract valence and arousal
-                    valence = mood_result.get('valence', 0.0)
-                    arousal = mood_result.get('arousal', 0.0)
-                except Exception as e:
-                    print(f"[WARNING] Music2Emotion analysis failed for segment {i+1}: {e}")
-                
-                rows.append({
-                    "Start": start,
-                    "End": end,
-                    "Length": end - start,
-                    "File": f"segment_{i+1}_music_minus_vocals.wav",
-                    "BPM": round(bpm, 1) if bpm else "Unknown",
-                    "Moods": moods_str,
-                    "Valence": round(valence, 3),
-                    "Arousal": round(arousal, 3),
-                    "Music_Probability": round(music_prob, 3),
-                    "CLAP_Tags": clap_str
-                })
-            except Exception as e:
-                print(f"[WARNING] Music analysis failed for segment {i+1}: {e}")
-                # Fallback to basic info if analysis fails
-                rows.append({
-                    "Start": start,
-                    "End": end,
-                    "Length": end - start,
-                    "File": f"segment_{i+1}_music_minus_vocals.wav",
-                    "BPM": "Unknown",
-                    "Moods": "Unknown",
-                    "Valence": 0.0,
-                    "Arousal": 0.0,
-                    "Music_Probability": 0.0,
-                    "CLAP_Tags": "Unknown"
-                })
-        except Exception as e:
-            print(f"[WARNING] Demucs failed for segment {i+1}: {e}")
-            continue
 
-    # 4. Save per-segment results to CSV in run_dir
-    if rows:
-        df = pd.DataFrame(rows)
-        df.to_csv(run_dir / "music_segments.csv", index=False)
-        print(f"[INFO] Output written to {run_dir}")
+        print(f"[DEBUG] Segment {i+1}: {start:.2f}-{end:.2f}s")
+
+        # Analyze the music segment directly (no Demucs processing)
+        try:
+            # Ensure audio is mono for analysis
+            if chunk.ndim > 1:
+                music_mono = librosa.to_mono(chunk.T)
+            else:
+                music_mono = chunk
+
+            # Ensure minimum length for analysis (at least 1 second)
+            min_samples = sr
+            if len(music_mono) < min_samples:
+                print(f"[WARNING] Segment {i+1} too short for analysis ({len(music_mono)} samples)")
+                raise ValueError("Audio too short for analysis")
+
+            # Initialize analysis variables
+            bpm = "Unknown"
+            moods_str = "Unknown"
+            valence = 0.0
+            arousal = 0.0
+            music_prob = 0.0
+            clap_categorized = {}
+            clap_top_overall = []
+            instruments = {}
+
+            # BPM analysis
+            try:
+                bpm = _bpm_track(music_mono, sr)
+            except Exception as e:
+                print(f"[WARNING] BPM analysis failed for segment {i+1}: {e}")
+
+            # Instrument detection via YAMNet
+            try:
+                instruments = extract_instruments(music_mono, sr=sr, top_n=5)
+            except Exception as e:
+                print(f"[WARNING] Instrument extraction failed for segment {i+1}: {e}")
+
+            # Music probability (using AST detector) - more robust
+            try:
+                music_prob = music_probability(music_mono, sr)
+            except Exception as e:
+                print(f"[WARNING] Music probability analysis failed for segment {i+1}: {e}")
+
+            # CLAP tags for music characteristics (categorized structure)
+            try:
+                clap_categorized = tag_chunk(music_mono, sr)
+
+                # Extract top tags per category for summary
+                top_tags = []
+                for category, tags in clap_categorized.items():
+                    sorted_tags = sorted(tags.items(), key=lambda x: x[1], reverse=True)
+                    # Get top 2 per category
+                    for tag, score in sorted_tags[:2]:
+                        top_tags.append((tag, score, category))
+
+                # Sort all top tags by score and take top 5 overall
+                clap_top_overall = sorted(top_tags, key=lambda x: x[1], reverse=True)[:5]
+
+            except Exception as e:
+                print(f"[WARNING] CLAP analysis failed for segment {i+1}: {e}")
+
+            # Key detection (keeping only key, not full chord analysis)
+            try:
+                chord_analysis = analyze_chords(audio_data=music_mono, sr=sr)
+                detected_key = chord_analysis.get('key', 'Unknown')
+            except Exception as e:
+                print(f"[WARNING] Key detection failed for segment {i+1}: {e}")
+                detected_key = "Unknown"
+
+            # Mood analysis using Music2Emotion - most fragile, try last
+            # Music2Emo requires a file path, so save temp segment
+            try:
+                segment_path = run_dir / f"segment_{i+1}_temp.wav"
+                sf.write(segment_path, music_mono, sr)
+
+                mood_result = global_moods(str(segment_path), threshold=thr)
+
+                # Extract top mood predictions
+                predicted_moods = mood_result.get('moods', [])
+                top_moods = predicted_moods[:3] if predicted_moods else []
+                moods_str = ", ".join(top_moods) if top_moods else "Unknown"
+
+                # Extract valence and arousal
+                valence = mood_result.get('valence', 0.0)
+                arousal = mood_result.get('arousal', 0.0)
+
+                # Clean up temp file
+                if segment_path.exists():
+                    segment_path.unlink()
+            except Exception as e:
+                print(f"[WARNING] Music2Emotion analysis failed for segment {i+1}: {e}")
+
+            # Create structured cue for .sibyl format
+            cue_id = f"cue_{i+1:03d}"
+            moods_list = moods_str.split(", ") if moods_str != "Unknown" else []
+
+            cue = create_cue(
+                cue_id=cue_id,
+                start=start,
+                end=end,
+                fps=fps,
+                bpm=bpm,
+                key=detected_key,
+                instruments=instruments,
+                moods=moods_list,
+                valence=valence,
+                arousal=arousal,
+                clap_categorized=clap_categorized,
+            )
+            cues.append(cue)
+
+            # Format CLAP tags for CSV output (backwards compatibility)
+            clap_summary = ", ".join([f"{tag} ({cat}): {score:.2f}"
+                                      for tag, score, cat in clap_top_overall]) if clap_top_overall else "Unknown"
+
+            # Format instruments for CSV output
+            instruments_summary = ", ".join([f"{name}: {score:.2f}"
+                                            for name, score in instruments.items()]) if instruments else "Unknown"
+
+            rows.append({
+                "Start": start,
+                "End": end,
+                "Length": end - start,
+                "BPM": round(bpm, 1) if bpm != "Unknown" else "Unknown",
+                "Key": detected_key,
+                "Instruments": instruments_summary,
+                "Instruments_Data": json.dumps(instruments) if instruments else "{}",
+                "Moods": moods_str,
+                "Valence": round(valence, 3),
+                "Arousal": round(arousal, 3),
+                "Music_Probability": round(music_prob, 3),
+                "CLAP_Top_Tags": clap_summary,
+                "CLAP_Full_Data": json.dumps(clap_categorized) if clap_categorized else "{}"
+            })
+        except Exception as e:
+            print(f"[WARNING] Music analysis failed for segment {i+1}: {e}")
+            # Fallback to basic info if analysis fails
+            rows.append({
+                "Start": start,
+                "End": end,
+                "Length": end - start,
+                "BPM": "Unknown",
+                "Key": "Unknown",
+                "Instruments": "Unknown",
+                "Instruments_Data": "{}",
+                "Moods": "Unknown",
+                "Valence": 0.0,
+                "Arousal": 0.0,
+                "Music_Probability": 0.0,
+                "CLAP_Top_Tags": "Unknown",
+                "CLAP_Full_Data": "{}"
+            })
+
+    # 4. Save results in both formats
+    if cues:
+        # Save new .sibyl.json format
+        project = create_project(
+            mx_file_path=src,
+            cues=cues,
+            project_name=src.stem,
+            fps=fps,
+        )
+        save_project(project, run_dir / "project.sibyl.json")
+        print(f"[INFO] Project saved to {run_dir / 'project.sibyl.json'}")
+
+        # Also save CSV for backwards compatibility
+        if rows:
+            df = pd.DataFrame(rows)
+            df.to_csv(run_dir / "music_segments.csv", index=False)
+            print(f"[INFO] CSV summary saved to {run_dir / 'music_segments.csv'}")
     else:
         print("[INFO] No valid segments to output.")
 
