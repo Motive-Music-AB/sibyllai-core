@@ -2,7 +2,6 @@ import os
 import subprocess
 import tempfile
 import numpy as np
-import tensorflow as tf
 import tensorflow_hub as hub
 import soundfile as sf
 import pandas as pd
@@ -171,4 +170,4 @@ def extract_instruments(audio_data, sr=16000, top_n=5):
     # Sort by score and return top N
     sorted_instruments = sorted(instrument_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
-    return dict(sorted_instruments) 
+    return dict(sorted_instruments)
