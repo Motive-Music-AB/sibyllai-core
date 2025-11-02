@@ -1,24 +1,27 @@
 "High-level spotting pipeline."
 from __future__ import annotations
+import json
 import os
-print("=== PIPELINE MODULE LOADED FROM:", os.path.abspath(__file__), "===")
-import json, shutil, tempfile, logging
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pandas as pd
-import numpy as np
 import soundfile as sf
 import librosa
 import essentia.standard as es
 
 from .detectors.yamnet_segmenter import segment_music_regions, extract_instruments
 from .detectors.chord_detector import analyze_chords  # For key detection only
-from .output import get_incremental_path
 from .detectors import (
     music_probability,
     tag_chunk,
 )
 from .detectors.m2e_wrapper import global_moods
+from .sibyl_format import create_cue, create_project, save_project
+
+print("=== PIPELINE MODULE LOADED FROM:", os.path.abspath(__file__), "===")
 
 def _extract_audio(src: str | Path) -> Path:
     print("=== ENTERED _extract_audio ===")
@@ -35,7 +38,7 @@ def _extract_audio(src: str | Path) -> Path:
              "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "1", str(wav)],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
         )
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         raise
     return wav
 
@@ -94,7 +97,8 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
         return
 
     # 3. For each region, extract audio and run detectors
-    rows = []
+    rows = []  # For backwards-compatible CSV
+    cues = []  # For new .sibyl JSON format
     min_duration = 3.0  # seconds
     for i, (start, end) in enumerate(music_regions):
         if (end - start) < min_duration:
@@ -119,7 +123,7 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
             if len(music_mono) < min_samples:
                 print(f"[WARNING] Segment {i+1} too short for analysis ({len(music_mono)} samples)")
                 raise ValueError("Audio too short for analysis")
-                
+
             # Initialize analysis variables
             bpm = "Unknown"
             moods_str = "Unknown"
@@ -197,7 +201,26 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
             except Exception as e:
                 print(f"[WARNING] Music2Emotion analysis failed for segment {i+1}: {e}")
 
-            # Format CLAP tags for CSV output (temporary until JSON export)
+            # Create structured cue for .sibyl format
+            cue_id = f"cue_{i+1:03d}"
+            moods_list = moods_str.split(", ") if moods_str != "Unknown" else []
+
+            cue = create_cue(
+                cue_id=cue_id,
+                start=start,
+                end=end,
+                fps=fps,
+                bpm=bpm,
+                key=detected_key,
+                instruments=instruments,
+                moods=moods_list,
+                valence=valence,
+                arousal=arousal,
+                clap_categorized=clap_categorized,
+            )
+            cues.append(cue)
+
+            # Format CLAP tags for CSV output (backwards compatibility)
             clap_summary = ", ".join([f"{tag} ({cat}): {score:.2f}"
                                       for tag, score, cat in clap_top_overall]) if clap_top_overall else "Unknown"
 
@@ -239,11 +262,23 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
                 "CLAP_Full_Data": "{}"
             })
 
-    # 4. Save per-segment results to CSV in run_dir
-    if rows:
-        df = pd.DataFrame(rows)
-        df.to_csv(run_dir / "music_segments.csv", index=False)
-        print(f"[INFO] Output written to {run_dir}")
+    # 4. Save results in both formats
+    if cues:
+        # Save new .sibyl.json format
+        project = create_project(
+            mx_file_path=src,
+            cues=cues,
+            project_name=src.stem,
+            fps=fps,
+        )
+        save_project(project, run_dir / "project.sibyl.json")
+        print(f"[INFO] Project saved to {run_dir / 'project.sibyl.json'}")
+
+        # Also save CSV for backwards compatibility
+        if rows:
+            df = pd.DataFrame(rows)
+            df.to_csv(run_dir / "music_segments.csv", index=False)
+            print(f"[INFO] CSV summary saved to {run_dir / 'music_segments.csv'}")
     else:
         print("[INFO] No valid segments to output.")
 
