@@ -565,11 +565,9 @@ export function WaveformViewer() {
                   }}
                 >
                   {ticks.map((tick, index) => {
-                      // Position tick absolutely based on its position in the full duration
-                      // Use zoom factor directly when zoomed, otherwise use proportional calculation
-                      const leftPx = zoom === 0 
-                        ? (tick.position / duration) * actualWidth  // Fit mode: use DOM width
-                        : tick.position * zoom                       // Zoomed: use zoom factor (pixels per second)
+                      // Position tick proportionally - same method WaveSurfer uses internally
+                      // This ensures perfect alignment with playhead at all zoom levels
+                      const leftPx = (tick.position / duration) * actualWidth
 
                       // Debug logging (only first tick)
                       if (index === 0) {
