@@ -412,8 +412,9 @@ export function WaveformViewer() {
     const nextIndex = currentIndex < ZOOM_LEVELS.length - 1 ? currentIndex + 1 : ZOOM_LEVELS.length - 1
     const newZoom = ZOOM_LEVELS[nextIndex]
 
-    setZoom(newZoom)
+    // Apply zoom to WaveSurfer first, then update state
     ws.zoom(newZoom)
+    setZoom(newZoom)
 
     // After zoom, recalculate scroll position to keep center time centered
     // Use double requestAnimationFrame to ensure DOM has fully updated
@@ -460,8 +461,9 @@ export function WaveformViewer() {
     const prevIndex = currentIndex > 0 ? currentIndex - 1 : 0
     const newZoom = ZOOM_LEVELS[prevIndex]
 
-    setZoom(newZoom)
+    // Apply zoom to WaveSurfer first, then update state
     ws.zoom(newZoom)
+    setZoom(newZoom)
 
     // After zoom, recalculate scroll position to keep center time centered
     requestAnimationFrame(() => {
