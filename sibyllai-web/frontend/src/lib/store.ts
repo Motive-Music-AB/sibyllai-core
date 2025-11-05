@@ -1,0 +1,150 @@
+import { create } from 'zustand'
+import type { SibylProject } from './types'
+
+interface AppState {
+  // Upload state
+  uploadedFile: File | null
+  fileId: string | null
+  fileName: string | null
+  startTimecode: string
+  framerate: number
+
+  // Segmentation state (Phase 1)
+  segments: [number, number][]
+  selectedSegments: [number, number][]  // User-selected segments for analysis
+  duration: number
+  musicThreshold: number
+  minGap: number
+  minCueLength: number
+  isSegmenting: boolean
+
+  // Analysis state (Phase 2)
+  isAnalyzing: boolean
+  analysisProgress: number
+  analysisStatus: string
+  sessionId: string | null
+  project: SibylProject | null
+
+  // UI state
+  activeCueId: string | null
+  showControls: boolean
+
+  // Actions
+  setUploadedFile: (file: File, fileId: string, fileName: string, startTimecode: string, framerate: number) => void
+  setStartTimecode: (tc: string) => void
+  setFramerate: (fps: number) => void
+  setSegments: (segments: [number, number][], duration: number) => void
+  setSelectedSegments: (segments: [number, number][]) => void
+  updateSegment: (index: number, newStart: number, newEnd: number) => void
+  setMusicThreshold: (threshold: number) => void
+  setMinGap: (gap: number) => void
+  setMinCueLength: (length: number) => void
+  setIsSegmenting: (isSegmenting: boolean) => void
+  setIsAnalyzing: (isAnalyzing: boolean) => void
+  setAnalysisProgress: (progress: number, status: string) => void
+  setProject: (sessionId: string, project: SibylProject) => void
+  setActiveCueId: (cueId: string | null) => void
+  setShowControls: (show: boolean) => void
+  reset: () => void
+  resetToSegmentation: () => void
+}
+
+const initialState = {
+  uploadedFile: null,
+  fileId: null,
+  fileName: null,
+  startTimecode: '01:00:00:00',
+  framerate: 24,
+  segments: [],
+  selectedSegments: [],
+  duration: 0,
+  musicThreshold: 0.000001,
+  minGap: 3.0,
+  minCueLength: 3.0,
+  isSegmenting: false,
+  isAnalyzing: false,
+  analysisProgress: 0,
+  analysisStatus: '',
+  sessionId: null,
+  project: null,
+  activeCueId: null,
+  showControls: true,
+}
+
+export const useAppStore = create<AppState>((set) => ({
+  ...initialState,
+
+  setUploadedFile: (file, fileId, fileName, startTimecode, framerate) =>
+    set({ uploadedFile: file, fileId, fileName, startTimecode, framerate }),
+
+  setStartTimecode: (tc) =>
+    set({ startTimecode: tc }),
+
+  setFramerate: (fps) =>
+    set({ framerate: fps }),
+
+  setSegments: (segments, duration) =>
+    set({ segments, duration }),
+
+  setSelectedSegments: (selectedSegments) =>
+    set({ selectedSegments }),
+
+  updateSegment: (index, newStart, newEnd) =>
+    set((state) => {
+      const newSegments = [...state.segments]
+      const [oldStart, oldEnd] = newSegments[index]
+      newSegments[index] = [newStart, newEnd]
+
+      // Update selectedSegments if this segment was selected
+      const newSelectedSegments = state.selectedSegments.map(([s, e]) => {
+        // If this selected segment matches the old coordinates, update to new coordinates
+        if (Math.abs(s - oldStart) < 0.01 && Math.abs(e - oldEnd) < 0.01) {
+          return [newStart, newEnd] as [number, number]
+        }
+        return [s, e]
+      })
+
+      return { segments: newSegments, selectedSegments: newSelectedSegments }
+    }),
+
+  setMusicThreshold: (threshold) =>
+    set({ musicThreshold: threshold }),
+
+  setMinGap: (gap) =>
+    set({ minGap: gap }),
+
+  setMinCueLength: (length) =>
+    set({ minCueLength: length }),
+
+  setIsSegmenting: (isSegmenting) =>
+    set({ isSegmenting }),
+
+  setIsAnalyzing: (isAnalyzing) =>
+    set({ isAnalyzing }),
+
+  setAnalysisProgress: (progress, status) =>
+    set({ analysisProgress: progress, analysisStatus: status }),
+
+  setProject: (sessionId, project) =>
+    set({ sessionId, project }),
+
+  setActiveCueId: (cueId) =>
+    set({ activeCueId: cueId }),
+
+  setShowControls: (show) =>
+    set({ showControls: show }),
+
+  reset: () =>
+    set(initialState),
+
+  resetToSegmentation: () =>
+    set({
+      project: null,
+      sessionId: null,
+      isAnalyzing: false,
+      analysisProgress: 0,
+      analysisStatus: '',
+      activeCueId: null,
+      showControls: true,
+    }),
+}))

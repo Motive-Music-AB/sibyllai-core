@@ -14,6 +14,7 @@ export function WaveformViewer() {
   const wavesurferRef = useRef<WaveSurfer | null>(null)
   const regionsRef = useRef<RegionsPlugin | null>(null)
   const rulerRef = useRef<HTMLDivElement>(null)
+  const zoomRef = useRef(0) // Synchronous zoom tracking for redraw event handler
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [isReady, setIsReady] = useState(false)
@@ -22,7 +23,6 @@ export function WaveformViewer() {
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
   const [ticks, setTicks] = useState<Array<{ position: number; timecode: string; isMajor: boolean }>>([])
   const [waveformWidth, setWaveformWidth] = useState(0)
-  const [waveformScrollLeft, setWaveformScrollLeft] = useState(0)
   const [rulerVersion, setRulerVersion] = useState(0) // Force re-render trigger
   const [draggingTimecodes, setDraggingTimecodes] = useState<{ start: string; end: string; startPos: number; endPos: number; activeHandle: 'start' | 'end' | 'both' } | null>(null)
   const dragStartRef = useRef<{ start: number; end: number } | null>(null)
@@ -76,22 +76,10 @@ export function WaveformViewer() {
     ws.on('ready', () => {
       setIsReady(true)
       // Waveform auto-fits by default (no zoom call needed)
-
-      // Generate initial ticks
-      const duration = ws.getDuration()
-      const initialTicks = generateTicks(duration, 0, framerate, startTimecode)
-      setTicks(initialTicks)
+      // Initial ticks and width are set by handleRedraw (triggered by isReady state change)
 
       // Initialize timecode display
       setCurrentTimecode(secondsToTimecode(0, framerate, startTimecode))
-
-      // Set initial waveform width
-      setTimeout(() => {
-        const wrapper = ws.getWrapper()
-        const initialWidth = wrapper?.scrollWidth || wrapper?.clientWidth || 0
-        console.log('Initial waveformWidth set to:', initialWidth)
-        setWaveformWidth(initialWidth)
-      }, 0)
     })
 
     ws.on('play', () => setIsPlaying(true))
@@ -120,55 +108,42 @@ export function WaveformViewer() {
     }
   }, [uploadedFile, fileId])
 
-  // Track waveform scroll position for ruler alignment
-  useEffect(() => {
-    if (!isReady) return
+  // Ruler now scrolls naturally inside the waveform container - no sync needed!
 
-    let animationFrameId: number
-
-    const readScrollPosition = () => {
-      const wrapper = wavesurferRef.current?.getWrapper() as HTMLElement | null
-      const parentContainer = waveformRef.current?.parentElement ?? null
-
-      const nextScrollLeft =
-        wrapper?.scrollLeft ?? parentContainer?.scrollLeft ?? 0
-
-      setWaveformScrollLeft((previous) => {
-        if (Math.abs(previous - nextScrollLeft) < 0.5) {
-          return previous
-        }
-        return nextScrollLeft
-      })
-
-      animationFrameId = requestAnimationFrame(readScrollPosition)
-    }
-
-    animationFrameId = requestAnimationFrame(readScrollPosition)
-
-    return () => cancelAnimationFrame(animationFrameId)
-  }, [isReady, zoom])
-
-  // Sync width on WaveSurfer redraw events
+  // Sync width and ticks on WaveSurfer redraw events
   useEffect(() => {
     if (!wavesurferRef.current || !isReady || !waveformRef.current) return
 
     const handleRedraw = () => {
-      // Always get actual width from WaveSurfer's wrapper after render
-      const wrapper = wavesurferRef.current?.getWrapper()
+      const ws = wavesurferRef.current
+      if (!ws) return
+
+      // Get actual width from WaveSurfer's wrapper after render
+      const wrapper = ws.getWrapper()
       const calculatedWidth = wrapper?.scrollWidth || wrapper?.clientWidth || 0
-      console.log('Redraw - setting waveformWidth to:', calculatedWidth)
+
+      // Regenerate ticks with current zoom level from ref (synchronous, not React state)
+      // This ensures we use the zoom level that was just applied, not the previous state
+      const currentZoom = zoomRef.current
+      const duration = ws.getDuration()
+      const newTicks = generateTicks(duration, currentZoom, framerate, startTimecode)
+
+      console.log('Redraw - width:', calculatedWidth, 'zoomRef:', currentZoom, 'zoomState:', zoom, 'ticks:', newTicks.length)
+
+      // Update both width and ticks atomically
       setWaveformWidth(calculatedWidth)
+      setTicks(newTicks)
       setRulerVersion(v => v + 1)
     }
 
-    // Set initial width
+    // Set initial width and ticks
     handleRedraw()
 
     wavesurferRef.current.on('redraw', handleRedraw)
     return () => {
       wavesurferRef.current?.un('redraw', handleRedraw)
     }
-  }, [zoom, isReady])
+  }, [zoom, isReady, framerate, startTimecode])
 
   // Helper to check if segment is selected
   const isSegmentSelected = (start: number, end: number) => {
@@ -273,14 +248,9 @@ export function WaveformViewer() {
     return () => window.removeEventListener('keydown', handleKeyPress)
   }, [activeCueId, project, isPlaying, playingCueId])
 
-  // Update ticks when zoom, framerate, or startTimecode changes
-  useEffect(() => {
-    if (!wavesurferRef.current || !isReady || !waveformRef.current) return
-
-    const duration = wavesurferRef.current.getDuration()
-    const newTicks = generateTicks(duration, zoom, framerate, startTimecode)
-    setTicks(newTicks)
-  }, [zoom, isReady, framerate, startTimecode])
+  // Note: Ticks are now generated in handleRedraw (above) to ensure they're synchronized
+  // with WaveSurfer's width changes. This prevents race conditions where ticks are
+  // regenerated with the old width before WaveSurfer finishes rendering.
 
   // Update regions when segments, selection, or active cue changes
   useEffect(() => {
@@ -412,29 +382,24 @@ export function WaveformViewer() {
     const nextIndex = currentIndex < ZOOM_LEVELS.length - 1 ? currentIndex + 1 : ZOOM_LEVELS.length - 1
     const newZoom = ZOOM_LEVELS[nextIndex]
 
-    // Apply zoom to WaveSurfer first, then update state
+    console.log('Zoom In - current:', zoom, 'currentIndex:', currentIndex, 'nextIndex:', nextIndex, 'newZoom:', newZoom)
+
+    // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
+    zoomRef.current = newZoom
     ws.zoom(newZoom)
     setZoom(newZoom)
 
     // After zoom, recalculate scroll position to keep center time centered
-    // Use double requestAnimationFrame to ensure DOM has fully updated
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const newWrapper = ws.getWrapper()
-        const newScrollWidth = newWrapper.scrollWidth
+      const newWrapper = ws.getWrapper()
+      const newScrollWidth = newWrapper.scrollWidth
 
-        // Update ruler width and force re-render
-        setWaveformWidth(newScrollWidth)
-        setRulerVersion(v => v + 1)
-        console.log('Zoom In - scrollWidth:', newScrollWidth, 'zoom:', newZoom)
+      // Calculate where the center time is now in pixels
+      const newCenterPx = (centerTime / duration) * newScrollWidth
 
-        // Calculate where the center time is now in pixels
-        const newCenterPx = (centerTime / duration) * newScrollWidth
-
-        // Scroll to keep it centered
-        const newScrollLeft = newCenterPx - (viewportWidth / 2)
-        newWrapper.scrollLeft = Math.max(0, newScrollLeft)
-      })
+      // Scroll to keep it centered
+      const newScrollLeft = newCenterPx - (viewportWidth / 2)
+      newWrapper.scrollLeft = Math.max(0, newScrollLeft)
     })
   }
 
@@ -461,46 +426,41 @@ export function WaveformViewer() {
     const prevIndex = currentIndex > 0 ? currentIndex - 1 : 0
     const newZoom = ZOOM_LEVELS[prevIndex]
 
-    // Apply zoom to WaveSurfer first, then update state
+    console.log('Zoom Out - current:', zoom, 'currentIndex:', currentIndex, 'prevIndex:', prevIndex, 'newZoom:', newZoom)
+
+    // If already at fit/min zoom, don't do anything
+    if (newZoom === zoom) {
+      console.log('Already at minimum zoom, skipping')
+      return
+    }
+
+    // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
+    zoomRef.current = newZoom
     ws.zoom(newZoom)
     setZoom(newZoom)
 
     // After zoom, recalculate scroll position to keep center time centered
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const newWrapper = ws.getWrapper()
-        const newScrollWidth = newWrapper.scrollWidth
+      const newWrapper = ws.getWrapper()
+      const newScrollWidth = newWrapper.scrollWidth
 
-        // Update ruler width and force re-render
-        setWaveformWidth(newScrollWidth)
-        setRulerVersion(v => v + 1)
-        console.log('Zoom Out - scrollWidth:', newScrollWidth, 'zoom:', newZoom)
+      // Calculate where the center time is now in pixels
+      const newCenterPx = (centerTime / duration) * newScrollWidth
 
-        // Calculate where the center time is now in pixels
-        const newCenterPx = (centerTime / duration) * newScrollWidth
-
-        // Scroll to keep it centered
-        const newScrollLeft = newCenterPx - (viewportWidth / 2)
-        newWrapper.scrollLeft = Math.max(0, newScrollLeft)
-      })
+      // Scroll to keep it centered
+      const newScrollLeft = newCenterPx - (viewportWidth / 2)
+      newWrapper.scrollLeft = Math.max(0, newScrollLeft)
     })
   }
 
   const handleZoomReset = () => {
+    console.log('Zoom Reset - current:', zoom, 'resetting to 0')
+
+    // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
+    zoomRef.current = 0
     setZoom(0)
     if (wavesurferRef.current) {
       wavesurferRef.current.zoom(0)
-
-      // Update ruler width after reset
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const wrapper = wavesurferRef.current?.getWrapper()
-          const newScrollWidth = wrapper?.scrollWidth || wrapper?.clientWidth || 0
-          setWaveformWidth(newScrollWidth)
-          setRulerVersion(v => v + 1)
-          console.log('Zoom Reset - scrollWidth:', newScrollWidth)
-        })
-      })
     }
   }
 
@@ -543,35 +503,42 @@ export function WaveformViewer() {
             </div>
           )}
 
-          {/* Timecode Ruler */}
-          {isReady && (() => {
-            // Always read fresh width directly from WaveSurfer DOM (rulerVersion just triggers re-render)
-            const wrapper = wavesurferRef.current?.getWrapper()
-            const actualWidth = wrapper?.scrollWidth || wrapper?.clientWidth || 0
-            const duration = wavesurferRef.current?.getDuration() || 1
+          <div className="overflow-x-auto border rounded-lg">
+            {/* Wrapper that contains both ruler and waveform - scrolls as one unit */}
+            <div
+              className="min-w-full"
+              style={{
+                display: zoom === 0 ? 'block' : 'inline-block',
+                width: zoom === 0 ? '100%' : 'auto'
+              }}
+            >
+              {/* Timecode Ruler - flows naturally in document, scrolls with waveform */}
+              {isReady && (() => {
+                // In fit mode (zoom=0), use container's clientWidth; otherwise use waveform's scrollWidth
+                let displayWidth
+                if (zoom === 0) {
+                  const container = waveformRef.current?.parentElement
+                  displayWidth = container?.clientWidth || waveformWidth || 0
+                } else {
+                  displayWidth = waveformWidth || wavesurferRef.current?.getWrapper()?.scrollWidth || 0
+                }
 
-            return (
-              <div
-                ref={rulerRef}
-                className="border rounded-t-lg overflow-hidden bg-gray-50"
-              >
-                <div
-                  className="relative h-8"
-                  style={{
-                    width: `${actualWidth}px`,
-                    minWidth: `${actualWidth}px`,
-                    transform: `translateX(-${waveformScrollLeft}px)`,
-                    willChange: 'transform',
-                  }}
-                >
-                  {ticks.map((tick, index) => {
-                      // Position tick proportionally - same method WaveSurfer uses internally
-                      // This ensures perfect alignment with playhead at all zoom levels
-                      const leftPx = (tick.position / duration) * actualWidth
+                const duration = wavesurferRef.current?.getDuration() || 1
 
-                      // Debug logging (only first tick)
+                return (
+                  <div
+                    ref={rulerRef}
+                    className="relative h-8 bg-gray-50 border-b"
+                    style={{
+                      width: zoom === 0 ? '100%' : `${displayWidth}px`,
+                      minWidth: zoom === 0 ? '100%' : `${displayWidth}px`,
+                    }}
+                  >
+                    {ticks.map((tick, index) => {
+                      const leftPx = (tick.position / duration) * displayWidth
+
                       if (index === 0) {
-                        console.log('Ruler render - actualWidth from DOM:', actualWidth, 'duration:', duration, 'zoom:', zoom, 'rulerVersion:', rulerVersion)
+                        console.log('Ruler render - width:', displayWidth, 'zoom:', zoom, 'ticks:', ticks.length)
                       }
 
                       return (
@@ -597,59 +564,58 @@ export function WaveformViewer() {
                         </div>
                       )
                     })}
-                </div>
-              </div>
-            )
-          })()}
-
-          <div className="relative overflow-x-auto border border-t-0 rounded-b-lg">
-            <div ref={waveformRef} className="w-full min-w-full pt-10" />
-
-            {/* Dragging timecode tooltips - positioned above handles */}
-            {draggingTimecodes && (
-              <>
-                {draggingTimecodes.activeHandle === 'both' ? (
-                  /* Combined tooltip when dragging whole region */
-                  <div
-                    className="absolute top-2 bg-blue-600 text-white px-3 py-2 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
-                    style={{
-                      left: `${(draggingTimecodes.startPos + draggingTimecodes.endPos) / 2}px`,
-                      transform: 'translateX(-50%)',
-                      zIndex: 52
-                    }}
-                  >
-                    <div>Start: {draggingTimecodes.start}</div>
-                    <div>End: {draggingTimecodes.end}</div>
                   </div>
-                ) : (
-                  /* Separate tooltips when dragging individual handles */
-                  <>
-                    {/* Start handle tooltip */}
+                )
+              })()}
+
+              <div ref={waveformRef} className="w-full" />
+
+              {/* Dragging timecode tooltips - positioned above handles */}
+              {draggingTimecodes && (
+                <>
+                  {draggingTimecodes.activeHandle === 'both' ? (
+                    /* Combined tooltip when dragging whole region */
                     <div
-                      className="absolute top-2 bg-blue-600 text-white px-2 py-1 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
+                      className="absolute top-2 bg-blue-600 text-white px-3 py-2 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
                       style={{
-                        left: `${draggingTimecodes.startPos}px`,
+                        left: `${(draggingTimecodes.startPos + draggingTimecodes.endPos) / 2}px`,
                         transform: 'translateX(-50%)',
-                        zIndex: draggingTimecodes.activeHandle === 'start' ? 52 : 50
+                        zIndex: 52
                       }}
                     >
-                      {draggingTimecodes.start}
+                      <div>Start: {draggingTimecodes.start}</div>
+                      <div>End: {draggingTimecodes.end}</div>
                     </div>
-                    {/* End handle tooltip */}
-                    <div
-                      className="absolute top-2 bg-blue-600 text-white px-2 py-1 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
-                      style={{
-                        left: `${draggingTimecodes.endPos}px`,
-                        transform: 'translateX(-50%)',
-                        zIndex: draggingTimecodes.activeHandle === 'end' ? 52 : 50
-                      }}
-                    >
-                      {draggingTimecodes.end}
-                    </div>
-                  </>
-                )}
-              </>
-            )}
+                  ) : (
+                    /* Separate tooltips when dragging individual handles */
+                    <>
+                      {/* Start handle tooltip */}
+                      <div
+                        className="absolute top-2 bg-blue-600 text-white px-2 py-1 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
+                        style={{
+                          left: `${draggingTimecodes.startPos}px`,
+                          transform: 'translateX(-50%)',
+                          zIndex: draggingTimecodes.activeHandle === 'start' ? 52 : 50
+                        }}
+                      >
+                        {draggingTimecodes.start}
+                      </div>
+                      {/* End handle tooltip */}
+                      <div
+                        className="absolute top-2 bg-blue-600 text-white px-2 py-1 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
+                        style={{
+                          left: `${draggingTimecodes.endPos}px`,
+                          transform: 'translateX(-50%)',
+                          zIndex: draggingTimecodes.activeHandle === 'end' ? 52 : 50
+                        }}
+                      >
+                        {draggingTimecodes.end}
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
           </div>
 
           {isReady && (

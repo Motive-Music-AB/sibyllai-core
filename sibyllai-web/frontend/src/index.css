@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme {
+  /* Light mode color scheme */
+  --color-background: oklch(0.98 0 0);
+  --color-foreground: oklch(0.2 0.01 286.63);
+
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.2 0.01 286.63);
+
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.2 0.01 286.63);
+
+  --color-primary: oklch(0.4 0.15 250);
+  --color-primary-foreground: oklch(1 0 0);
+
+  --color-secondary: oklch(0.95 0 0);
+  --color-secondary-foreground: oklch(0.2 0.01 286.63);
+
+  --color-muted: oklch(0.96 0 0);
+  --color-muted-foreground: oklch(0.5 0.01 286.63);
+
+  --color-accent: oklch(0.95 0 0);
+  --color-accent-foreground: oklch(0.2 0.01 286.63);
+
+  --color-destructive: oklch(0.55 0.22 29);
+  --color-destructive-foreground: oklch(1 0 0);
+
+  --color-border: oklch(0.88 0 0);
+  --color-input: oklch(0.88 0 0);
+  --color-ring: oklch(0.4 0.15 250);
+
+  --radius: 0.5rem;
+}
+
+body {
+  background: oklch(var(--color-background));
+  color: oklch(var(--color-foreground));
+}
+
+/* Hide scrollbar for ruler */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
