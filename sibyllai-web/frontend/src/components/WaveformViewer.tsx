@@ -7,7 +7,7 @@ import { useAppStore } from '@/lib/store'
 import { generateTicks, secondsToTimecode } from '@/lib/timecode'
 
 // Define zoom levels for smoother progression
-const ZOOM_LEVELS = [0, 10, 25, 50, 100, 200, 400, 800]
+const ZOOM_LEVELS = [0, 10, 25, 50, 100]
 
 export function WaveformViewer() {
   const waveformRef = useRef<HTMLDivElement>(null)
