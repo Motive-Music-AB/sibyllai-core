@@ -36,6 +36,9 @@ interface AppState {
   setSegments: (segments: [number, number][], duration: number) => void
   setSelectedSegments: (segments: [number, number][]) => void
   updateSegment: (index: number, newStart: number, newEnd: number) => void
+  splitSegment: (index: number, splitTime: number) => void
+  addSegment: (start: number, end: number) => void
+  deleteSegment: (index: number) => void
   setMusicThreshold: (threshold: number) => void
   setMinGap: (gap: number) => void
   setMinCueLength: (length: number) => void
@@ -96,13 +99,75 @@ export const useAppStore = create<AppState>((set) => ({
       newSegments[index] = [newStart, newEnd]
 
       // Update selectedSegments if this segment was selected
-      const newSelectedSegments = state.selectedSegments.map(([s, e]) => {
+      const newSelectedSegments: [number, number][] = state.selectedSegments.map(([s, e]) => {
         // If this selected segment matches the old coordinates, update to new coordinates
         if (Math.abs(s - oldStart) < 0.01 && Math.abs(e - oldEnd) < 0.01) {
           return [newStart, newEnd] as [number, number]
         }
-        return [s, e]
+        return [s, e] as [number, number]
       })
+
+      return { segments: newSegments, selectedSegments: newSelectedSegments }
+    }),
+
+  splitSegment: (index, splitTime) =>
+    set((state) => {
+      const [start, end] = state.segments[index]
+
+      // Validate split time is within segment bounds
+      if (splitTime <= start || splitTime >= end) {
+        return state
+      }
+
+      const newSegments = [...state.segments]
+      // Replace original segment with two new segments
+      newSegments.splice(index, 1, [start, splitTime], [splitTime, end])
+
+      // Update selectedSegments if this segment was selected
+      const wasSelected = state.selectedSegments.some(([s, e]) =>
+        Math.abs(s - start) < 0.01 && Math.abs(e - end) < 0.01
+      )
+
+      let newSelectedSegments = state.selectedSegments.filter(([s, e]) =>
+        !(Math.abs(s - start) < 0.01 && Math.abs(e - end) < 0.01)
+      )
+
+      // If original was selected, select both new segments
+      if (wasSelected) {
+        newSelectedSegments = [
+          ...newSelectedSegments,
+          [start, splitTime] as [number, number],
+          [splitTime, end] as [number, number],
+        ]
+      }
+
+      return { segments: newSegments, selectedSegments: newSelectedSegments }
+    }),
+
+  addSegment: (start, end) =>
+    set((state) => {
+      // Validate segment
+      if (start >= end) {
+        return state
+      }
+
+      const newSegment: [number, number] = [start, end]
+
+      // Insert segment in chronological order
+      const newSegments = [...state.segments, newSegment].sort((a, b) => a[0] - b[0])
+
+      return { segments: newSegments }
+    }),
+
+  deleteSegment: (index) =>
+    set((state) => {
+      const [start, end] = state.segments[index]
+      const newSegments = state.segments.filter((_, i) => i !== index)
+
+      // Remove from selectedSegments if it was selected
+      const newSelectedSegments = state.selectedSegments.filter(([s, e]) =>
+        !(Math.abs(s - start) < 0.01 && Math.abs(e - end) < 0.01)
+      )
 
       return { segments: newSegments, selectedSegments: newSelectedSegments }
     }),

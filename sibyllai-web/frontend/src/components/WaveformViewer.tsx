@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions'
 import { Card, CardContent } from '@/components/ui/card'
@@ -23,9 +23,9 @@ export function WaveformViewer() {
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
   const [ticks, setTicks] = useState<Array<{ position: number; timecode: string; isMajor: boolean }>>([])
   const [waveformWidth, setWaveformWidth] = useState(0)
-  const [rulerVersion, setRulerVersion] = useState(0) // Force re-render trigger
   const [draggingTimecodes, setDraggingTimecodes] = useState<{ start: string; end: string; startPos: number; endPos: number; activeHandle: 'start' | 'end' | 'both' } | null>(null)
   const dragStartRef = useRef<{ start: number; end: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; segmentIndex: number } | null>(null)
 
   const {
     uploadedFile,
@@ -33,6 +33,9 @@ export function WaveformViewer() {
     selectedSegments,
     setSelectedSegments,
     updateSegment,
+    splitSegment,
+    addSegment,
+    deleteSegment,
     fileId,
     project,
     activeCueId,
@@ -55,16 +58,11 @@ export function WaveformViewer() {
       barGap: 1,
       height: 180,
       normalize: true,
-      scrollParent: true,
       // fillParent defaults to true - keep it that way for now
     })
 
     // Create regions plugin with drag-to-create enabled
-    const regions = ws.registerPlugin(RegionsPlugin.create({
-      dragSelection: {
-        slop: 5,
-      },
-    }))
+    const regions = ws.registerPlugin(RegionsPlugin.create())
 
     wavesurferRef.current = ws
     regionsRef.current = regions
@@ -107,6 +105,7 @@ export function WaveformViewer() {
       ws.destroy()
       URL.revokeObjectURL(url)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedFile, fileId])
 
   // Ruler now scrolls naturally inside the waveform container - no sync needed!
@@ -138,7 +137,6 @@ export function WaveformViewer() {
       // Update both width and ticks atomically
       setWaveformWidth(calculatedWidth)
       setTicks(newTicks)
-      setRulerVersion(v => v + 1)
     }
 
     // Set initial width and ticks
@@ -151,22 +149,22 @@ export function WaveformViewer() {
   }, [zoom, isReady, framerate, startTimecode])
 
   // Helper to check if segment is selected
-  const isSegmentSelected = (start: number, end: number) => {
+  const isSegmentSelected = useCallback((start: number, end: number) => {
     return selectedSegments.some(([s, e]) =>
       Math.abs(s - start) < 0.01 && Math.abs(e - end) < 0.01
     )
-  }
+  }, [selectedSegments])
 
   // Helper to find cue for a segment
-  const findCueForSegment = (start: number, end: number) => {
+  const findCueForSegment = useCallback((start: number, end: number) => {
     if (!project?.cues) return null
     return project.cues.find((cue) =>
       Math.abs(cue.start - start) < 0.01 && Math.abs(cue.end - end) < 0.01
     )
-  }
+  }, [project])
 
   // Helper to set active cue (only used after analysis)
-  const handleSegmentClick = (start: number, end: number) => {
+  const handleSegmentClick = useCallback((start: number, end: number) => {
     // Only handle clicks after analysis - clicking sets the active cue
     if (project) {
       const cue = findCueForSegment(start, end)
@@ -175,7 +173,7 @@ export function WaveformViewer() {
       }
     }
     // Before analysis, do nothing - only the Select button should toggle selection
-  }
+  }, [project, findCueForSegment, setActiveCueId])
 
   // Helper to toggle segment selection
   const toggleSegmentSelection = (start: number, end: number) => {
@@ -251,7 +249,31 @@ export function WaveformViewer() {
 
     window.addEventListener('keydown', handleKeyPress)
     return () => window.removeEventListener('keydown', handleKeyPress)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCueId, project, isPlaying, playingCueId])
+
+  // Close context menu on click outside
+  useEffect(() => {
+    const handleClickOutside = () => setContextMenu(null)
+    if (contextMenu) {
+      window.addEventListener('click', handleClickOutside)
+      return () => window.removeEventListener('click', handleClickOutside)
+    }
+  }, [contextMenu])
+
+  // Handle split cue at playhead
+  const handleSplitAtPlayhead = (segmentIndex: number) => {
+    if (!wavesurferRef.current) return
+    const currentTime = wavesurferRef.current.getCurrentTime()
+    splitSegment(segmentIndex, currentTime)
+    setContextMenu(null)
+  }
+
+  // Handle delete cue
+  const handleDeleteCue = (segmentIndex: number) => {
+    deleteSegment(segmentIndex)
+    setContextMenu(null)
+  }
 
   // Note: Ticks are now generated in handleRedraw (above) to ensure they're synchronized
   // with WaveSurfer's width changes. This prevents race conditions where ticks are
@@ -259,15 +281,30 @@ export function WaveformViewer() {
 
   // Update regions when segments, selection, or active cue changes
   useEffect(() => {
-    if (!regionsRef.current || segments.length === 0) return
+    if (!regionsRef.current) return
 
     // Clear existing regions
     regionsRef.current.clearRegions()
 
+    // Handle drag-to-create new regions (only before analysis)
+    if (!project) {
+      // Enable drag selection for creating new regions
+      regionsRef.current.enableDragSelection({
+        color: 'rgba(148, 163, 184, 0.2)',
+      })
+
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const handleRegionCreated = (region: any) => {
+        // Add the new region to segments
+        addSegment(region.start, region.end)
+      }
+      regionsRef.current.on('region-created', handleRegionCreated)
+    }
+
+    if (segments.length === 0) return
+
     // Add new regions with appropriate styling
     segments.forEach(([start, end], index) => {
-      const duration = end - start
-      const showLabel = duration > 5
       const selected = isSegmentSelected(start, end)
       const cue = findCueForSegment(start, end)
       const isActive = cue && activeCueId === cue.id
@@ -297,19 +334,55 @@ export function WaveformViewer() {
       // Add event handlers
       if (region) {
         // Click handler
-        region.on('click', () => {
-          handleSegmentClick(start, end)
+        region.on('click', (e) => {
+          // Check if it's a right-click
+          if (e.button === 2) {
+            e.preventDefault()
+            e.stopPropagation()
+
+            // Only show context menu before analysis
+            if (!project) {
+              setContextMenu({
+                x: e.clientX,
+                y: e.clientY,
+                segmentIndex: index,
+              })
+            }
+          } else {
+            // Left click - normal behavior
+            handleSegmentClick(start, end)
+          }
         })
+
+        // Prevent default context menu on region
+        if (!project && region.element) {
+          region.element.addEventListener('contextmenu', (e) => {
+            e.preventDefault()
+          })
+        }
 
         // Update handler for drag/resize (only if editable)
         if (editable) {
-          // Track initial positions when drag starts
-          region.on('update-start', () => {
-            dragStartRef.current = { start: region.start, end: region.end }
-          })
+          // Track initial positions when drag starts - store in a closure variable
+          let dragStart: { start: number; end: number } | null = null
+
+          // Listen to drag/resize events to capture start position
+          const handleDragStart = () => {
+            dragStart = { start: region.start, end: region.end }
+            dragStartRef.current = dragStart
+          }
+
+          // WaveSurfer regions may not have update-start event, so we capture on first update
+          let isFirstUpdate = true
 
           // Show timecode while dragging
           region.on('update', () => {
+            // Capture initial position on first update (start of drag)
+            if (isFirstUpdate) {
+              handleDragStart()
+              isFirstUpdate = false
+            }
+
             const startTc = secondsToTimecode(region.start, framerate, startTimecode)
             const endTc = secondsToTimecode(region.end, framerate, startTimecode)
 
@@ -330,9 +403,9 @@ export function WaveformViewer() {
 
             // Detect which handle is being actively dragged
             let activeHandle: 'start' | 'end' | 'both' = 'both'
-            if (dragStartRef.current) {
-              const startChanged = Math.abs(region.start - dragStartRef.current.start) > 0.01
-              const endChanged = Math.abs(region.end - dragStartRef.current.end) > 0.01
+            if (dragStart) {
+              const startChanged = Math.abs(region.start - dragStart.start) > 0.01
+              const endChanged = Math.abs(region.end - dragStart.end) > 0.01
 
               if (startChanged && !endChanged) {
                 activeHandle = 'start'
@@ -349,14 +422,16 @@ export function WaveformViewer() {
             const newStart = region.start
             const newEnd = region.end
             updateSegment(index, newStart, newEnd)
-            // Clear dragging timecodes and ref
+            // Clear dragging timecodes and reset state
             setDraggingTimecodes(null)
             dragStartRef.current = null
+            dragStart = null
+            isFirstUpdate = true
           })
         }
       }
     })
-  }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, zoom])
+  }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, zoom, addSegment, isSegmentSelected, findCueForSegment, handleSegmentClick])
 
   const handlePlayPause = () => {
     if (wavesurferRef.current) {
@@ -703,7 +778,12 @@ export function WaveformViewer() {
               <div className="flex items-center gap-4 ml-auto">
                 {segments.length > 0 && !project && (
                   <div className="text-xs text-muted-foreground">
-                    Drag cue edges to adjust boundaries
+                    Drag edges to adjust • Drag empty area to create • Right-click to split/delete
+                  </div>
+                )}
+                {!segments.length && !project && isReady && (
+                  <div className="text-xs text-muted-foreground">
+                    Drag on waveform to create cues manually
                   </div>
                 )}
                 {project && (
@@ -712,6 +792,33 @@ export function WaveformViewer() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Context Menu */}
+          {contextMenu && (
+            <div
+              className="fixed bg-white border border-gray-300 rounded-md shadow-lg py-1 z-50"
+              style={{
+                left: `${contextMenu.x}px`,
+                top: `${contextMenu.y}px`,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+                onClick={() => handleSplitAtPlayhead(contextMenu.segmentIndex)}
+              >
+                <span>✂️</span>
+                <span>Split at Playhead</span>
+              </button>
+              <button
+                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 text-red-600"
+                onClick={() => handleDeleteCue(contextMenu.segmentIndex)}
+              >
+                <span>🗑️</span>
+                <span>Delete Cue</span>
+              </button>
             </div>
           )}
         </div>
