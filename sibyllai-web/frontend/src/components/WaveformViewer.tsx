@@ -56,6 +56,7 @@ export function WaveformViewer() {
       height: 180,
       normalize: true,
       scrollParent: true,
+      // fillParent defaults to true - keep it that way for now
     })
 
     // Create regions plugin with drag-to-create enabled
@@ -120,11 +121,15 @@ export function WaveformViewer() {
 
       // Get actual width from WaveSurfer's wrapper after render
       const wrapper = ws.getWrapper()
-      const calculatedWidth = wrapper?.scrollWidth || wrapper?.clientWidth || 0
+      const currentZoom = zoomRef.current
+      
+      // For zoom=0 (fit mode), use clientWidth; otherwise use scrollWidth
+      const calculatedWidth = currentZoom === 0 
+        ? (wrapper?.clientWidth || 0)
+        : (wrapper?.scrollWidth || wrapper?.clientWidth || 0)
 
       // Regenerate ticks with current zoom level from ref (synchronous, not React state)
       // This ensures we use the zoom level that was just applied, not the previous state
-      const currentZoom = zoomRef.current
       const duration = ws.getDuration()
       const newTicks = generateTicks(duration, currentZoom, framerate, startTimecode)
 
@@ -377,8 +382,16 @@ export function WaveformViewer() {
     // Center time position
     const centerTime = (centerPx / scrollWidth) * duration
 
-    // Find current zoom level index and move to next level
-    const currentIndex = ZOOM_LEVELS.findIndex(level => level >= zoom)
+    // Find current zoom level index - try exact match first, then find lowest level >= zoom
+    let currentIndex = ZOOM_LEVELS.findIndex(level => level === zoom)
+    if (currentIndex === -1) {
+      // No exact match - find the lowest level that's >= current zoom
+      currentIndex = ZOOM_LEVELS.findIndex(level => level >= zoom)
+      // If still not found, default to last index
+      if (currentIndex === -1) currentIndex = ZOOM_LEVELS.length - 1
+    }
+    
+    // Move to next level (higher zoom)
     const nextIndex = currentIndex < ZOOM_LEVELS.length - 1 ? currentIndex + 1 : ZOOM_LEVELS.length - 1
     const newZoom = ZOOM_LEVELS[nextIndex]
 
@@ -421,15 +434,28 @@ export function WaveformViewer() {
     // Center time position
     const centerTime = (centerPx / scrollWidth) * duration
 
-    // Find current zoom level index and move to previous level
-    const currentIndex = ZOOM_LEVELS.findIndex(level => level >= zoom)
+    // Find current zoom level index - try exact match first, then find highest level <= zoom
+    let currentIndex = ZOOM_LEVELS.findIndex(level => level === zoom)
+    if (currentIndex === -1) {
+      // No exact match - find the highest level that's <= current zoom
+      for (let i = ZOOM_LEVELS.length - 1; i >= 0; i--) {
+        if (ZOOM_LEVELS[i] <= zoom) {
+          currentIndex = i
+          break
+        }
+      }
+      // If still not found, default to 0
+      if (currentIndex === -1) currentIndex = 0
+    }
+
+    // Move to previous level (lower zoom)
     const prevIndex = currentIndex > 0 ? currentIndex - 1 : 0
     const newZoom = ZOOM_LEVELS[prevIndex]
 
     console.log('Zoom Out - current:', zoom, 'currentIndex:', currentIndex, 'prevIndex:', prevIndex, 'newZoom:', newZoom)
 
     // If already at fit/min zoom, don't do anything
-    if (newZoom === zoom) {
+    if (newZoom === zoom || currentIndex === 0) {
       console.log('Already at minimum zoom, skipping')
       return
     }
@@ -440,16 +466,19 @@ export function WaveformViewer() {
     setZoom(newZoom)
 
     // After zoom, recalculate scroll position to keep center time centered
+    // Use double requestAnimationFrame to ensure DOM has fully updated (especially for zoom=0)
     requestAnimationFrame(() => {
-      const newWrapper = ws.getWrapper()
-      const newScrollWidth = newWrapper.scrollWidth
+      requestAnimationFrame(() => {
+        const newWrapper = ws.getWrapper()
+        const newScrollWidth = newWrapper.scrollWidth
 
-      // Calculate where the center time is now in pixels
-      const newCenterPx = (centerTime / duration) * newScrollWidth
+        // Calculate where the center time is now in pixels
+        const newCenterPx = (centerTime / duration) * newScrollWidth
 
-      // Scroll to keep it centered
-      const newScrollLeft = newCenterPx - (viewportWidth / 2)
-      newWrapper.scrollLeft = Math.max(0, newScrollLeft)
+        // Scroll to keep it centered
+        const newScrollLeft = newCenterPx - (viewportWidth / 2)
+        newWrapper.scrollLeft = Math.max(0, newScrollLeft)
+      })
     })
   }
 
@@ -506,21 +535,27 @@ export function WaveformViewer() {
           <div className="overflow-x-auto border rounded-lg">
             {/* Wrapper that contains both ruler and waveform - scrolls as one unit */}
             <div
-              className="min-w-full"
               style={{
                 display: zoom === 0 ? 'block' : 'inline-block',
-                width: zoom === 0 ? '100%' : 'auto'
+                width: zoom === 0 ? '100%' : 'auto',
+                minWidth: zoom === 0 ? '100%' : '0'
               }}
             >
               {/* Timecode Ruler - flows naturally in document, scrolls with waveform */}
               {isReady && (() => {
-                // In fit mode (zoom=0), use container's clientWidth; otherwise use waveform's scrollWidth
-                let displayWidth
-                if (zoom === 0) {
-                  const container = waveformRef.current?.parentElement
-                  displayWidth = container?.clientWidth || waveformWidth || 0
-                } else {
-                  displayWidth = waveformWidth || wavesurferRef.current?.getWrapper()?.scrollWidth || 0
+                // Always prefer waveformWidth from state (updated by handleRedraw) for consistency
+                // Fallback to direct DOM measurement if state not yet updated
+                let displayWidth = waveformWidth
+                if (!displayWidth || displayWidth === 0) {
+                  const wrapper = wavesurferRef.current?.getWrapper()
+                  if (zoom === 0) {
+                    // In fit mode, use container width
+                    const container = waveformRef.current?.parentElement
+                    displayWidth = container?.clientWidth || wrapper?.clientWidth || 0
+                  } else {
+                    // In zoom mode, use scroll width
+                    displayWidth = wrapper?.scrollWidth || wrapper?.clientWidth || 0
+                  }
                 }
 
                 const duration = wavesurferRef.current?.getDuration() || 1
