@@ -286,8 +286,9 @@ export function WaveformViewer() {
     // Clear existing regions
     regionsRef.current.clearRegions()
 
-    // Handle drag-to-create new regions (only before analysis)
-    if (!project) {
+    // Handle drag-to-create new regions (only after detection, before analysis)
+    // segments.length > 0 means detection has run
+    if (!project && segments.length > 0) {
       // Enable drag selection for creating new regions
       regionsRef.current.enableDragSelection({
         color: 'rgba(148, 163, 184, 0.2)',
@@ -295,8 +296,10 @@ export function WaveformViewer() {
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const handleRegionCreated = (region: any) => {
-        // Add the new region to segments
-        addSegment(region.start, region.end)
+        // Defer state update to avoid updating during render
+        setTimeout(() => {
+          addSegment(region.start, region.end)
+        }, 0)
       }
       regionsRef.current.on('region-created', handleRegionCreated)
     }
@@ -778,12 +781,7 @@ export function WaveformViewer() {
               <div className="flex items-center gap-4 ml-auto">
                 {segments.length > 0 && !project && (
                   <div className="text-xs text-muted-foreground">
-                    Drag edges to adjust • Drag empty area to create • Right-click to split/delete
-                  </div>
-                )}
-                {!segments.length && !project && isReady && (
-                  <div className="text-xs text-muted-foreground">
-                    Drag on waveform to create cues manually
+                    Drag edges to adjust • Drag empty area to add • Right-click to split/delete
                   </div>
                 )}
                 {project && (
