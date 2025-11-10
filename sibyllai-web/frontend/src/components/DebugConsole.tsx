@@ -79,7 +79,7 @@ export function DebugConsole() {
         pendingLogsRef.current = []
 
         try {
-          await fetch('http://localhost:8001/api/debug-logs', {
+          await fetch('http://localhost:8002/api/debug-logs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(
