@@ -8,11 +8,16 @@ interface LogEntry {
 }
 
 export function DebugConsole() {
+  // DISABLED: This component was causing infinite render loops
+  return null
+
+  /* ORIGINAL CODE - DISABLED
   const [isVisible, setIsVisible] = useState(false)
   const [logs, setLogs] = useState<LogEntry[]>([])
   const logsEndRef = useRef<HTMLDivElement>(null)
   const pendingLogsRef = useRef<LogEntry[]>([])
   const maxLogs = 100 // Keep last 100 logs
+  */
 
   useEffect(() => {
     // Intercept console methods
@@ -28,13 +33,17 @@ export function DebugConsole() {
 
       const logEntry = { type, message, timestamp: new Date() }
 
-      setLogs(prev => {
-        const newLogs = [...prev, logEntry]
-        return newLogs.slice(-maxLogs) // Keep only last maxLogs entries
-      })
-
       // Add to pending logs for backend sync
       pendingLogsRef.current.push(logEntry)
+
+      // Defer state update to avoid updating during render
+      // Use requestIdleCallback or timeout to batch updates
+      setTimeout(() => {
+        setLogs(prev => {
+          const newLogs = [...prev, logEntry]
+          return newLogs.slice(-maxLogs) // Keep only last maxLogs entries
+        })
+      }, 0)
     }
 
     console.log = (...args) => {

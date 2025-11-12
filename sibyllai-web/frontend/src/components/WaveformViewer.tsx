@@ -286,71 +286,66 @@ export function WaveformViewer() {
     // Clear existing regions
     regionsRef.current.clearRegions()
 
-    // Handle drag-to-create new regions (only after detection, before analysis)
-    // segments.length > 0 means detection has run
-    if (!project && segments.length > 0) {
-      // Enable drag selection for creating new regions
-      regionsRef.current.enableDragSelection({
-        color: 'rgba(148, 163, 184, 0.2)',
-      })
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const handleRegionCreated = (region: any) => {
-        // Defer state update to avoid updating during render
-        setTimeout(() => {
-          addSegment(region.start, region.end)
-        }, 0)
-      }
-      regionsRef.current.on('region-created', handleRegionCreated)
-    }
-
     if (segments.length === 0) return
 
+    // Safety check: Limit number of regions to prevent freezing
+    const MAX_REGIONS = 20
+    const segmentsToRender = segments.slice(0, MAX_REGIONS)
+
+    if (segments.length > MAX_REGIONS) {
+      console.warn(`Too many segments (${segments.length}). Only rendering first ${MAX_REGIONS}. Increase threshold to detect fewer cues.`)
+    }
+
     // Add new regions with appropriate styling
-    segments.forEach(([start, end], index) => {
-      const selected = isSegmentSelected(start, end)
-      const cue = findCueForSegment(start, end)
-      const isActive = cue && activeCueId === cue.id
+    // Use setTimeout with index to add regions asynchronously, preventing UI freeze
+    segmentsToRender.forEach(([start, end], index) => {
+      setTimeout(() => {
+        if (!regionsRef.current) return
 
-      // Determine color based on state
-      let color: string
-      if (isActive) {
-        color = 'rgba(59, 130, 246, 0.5)' // Bright blue for active
-      } else if (selected) {
-        color = 'rgba(34, 197, 94, 0.3)' // Green for selected
-      } else {
-        color = 'rgba(148, 163, 184, 0.2)' // Light gray for unselected
-      }
+        const actualIndex = segments.findIndex(([s, e]) => s === start && e === end)
+        const selected = isSegmentSelected(start, end)
+        const cue = findCueForSegment(start, end)
+        const isActive = cue && activeCueId === cue.id
 
-      // Enable dragging/resizing only before analysis
-      const editable = !project
+        // Determine color based on state
+        let color: string
+        if (isActive) {
+          color = 'rgba(59, 130, 246, 0.5)' // Bright blue for active
+        } else if (selected) {
+          color = 'rgba(34, 197, 94, 0.3)' // Green for selected
+        } else {
+          color = 'rgba(148, 163, 184, 0.2)' // Light gray for unselected
+        }
 
-      const region = regionsRef.current?.addRegion({
+        // Enable dragging/resizing only before analysis
+        const editable = !project
+
+        const region = regionsRef.current?.addRegion({
         start,
         end,
         color,
         drag: editable,
         resize: editable,
         content: '',  // Remove number labels
-      })
+        })
 
-      // Add event handlers
-      if (region) {
-        // Click handler
-        region.on('click', (e) => {
-          // Check if it's a right-click
-          if (e.button === 2) {
-            e.preventDefault()
-            e.stopPropagation()
+        // Add event handlers
+        if (region) {
+          // Click handler
+          region.on('click', (e) => {
+            // Check if it's a right-click
+            if (e.button === 2) {
+              e.preventDefault()
+              e.stopPropagation()
 
-            // Only show context menu before analysis
-            if (!project) {
-              setContextMenu({
-                x: e.clientX,
-                y: e.clientY,
-                segmentIndex: index,
-              })
-            }
+              // Only show context menu before analysis
+              if (!project) {
+                setContextMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  segmentIndex: actualIndex,
+                })
+              }
           } else {
             // Left click - normal behavior
             handleSegmentClick(start, end)
@@ -424,7 +419,7 @@ export function WaveformViewer() {
           region.on('update-end', () => {
             const newStart = region.start
             const newEnd = region.end
-            updateSegment(index, newStart, newEnd)
+            updateSegment(actualIndex, newStart, newEnd)
             // Clear dragging timecodes and reset state
             setDraggingTimecodes(null)
             dragStartRef.current = null
@@ -432,8 +427,37 @@ export function WaveformViewer() {
             isFirstUpdate = true
           })
         }
-      }
+        }
+      }, index * 10) // Stagger region creation by 10ms each to prevent UI freeze
     })
+
+    // After all programmatic regions are added, enable drag-to-create for user
+    // Only enable if before analysis (project is null) and detection has run
+    if (!project && segments.length > 0) {
+      setTimeout(() => {
+        if (!regionsRef.current) return
+
+        // Enable drag selection for creating new regions
+        regionsRef.current.enableDragSelection({
+          color: 'rgba(148, 163, 184, 0.2)',
+        })
+
+        // Listen for user-created regions (drag-to-create)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handleRegionCreated = (region: any) => {
+          // Only add if it's a new region (not already in segments)
+          const exists = segments.some(([s, e]) =>
+            Math.abs(s - region.start) < 0.1 && Math.abs(e - region.end) < 0.1
+          )
+          if (!exists) {
+            setTimeout(() => {
+              addSegment(region.start, region.end)
+            }, 0)
+          }
+        }
+        regionsRef.current.on('region-created', handleRegionCreated)
+      }, (segmentsToRender.length + 1) * 10) // Wait for all regions to be added
+    }
   }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, zoom, addSegment, isSegmentSelected, findCueForSegment, handleSegmentClick])
 
   const handlePlayPause = () => {
@@ -540,11 +564,22 @@ export function WaveformViewer() {
 
     // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
     zoomRef.current = newZoom
-    ws.zoom(newZoom)
+
+    // WORKAROUND: WaveSurfer has a bug where zoom() doesn't shrink the canvas when zooming out
+    // The only way to make it work is to go to zoom=0 first, then zoom to the target level
+    if (newZoom > 0) {
+      ws.zoom(0)  // First reset to fit-to-width
+      // Wait a tiny bit for the DOM to update
+      setTimeout(() => {
+        ws.zoom(newZoom)  // Then zoom to target level
+      }, 0)
+    } else {
+      ws.zoom(newZoom)  // For zoom=0, just apply directly
+    }
     setZoom(newZoom)
 
     // After zoom, recalculate scroll position to keep center time centered
-    // Use double requestAnimationFrame to ensure DOM has fully updated (especially for zoom=0)
+    // Always use double RAF for zoom out to ensure DOM has shrunk properly
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const newWrapper = ws.getWrapper()
@@ -649,10 +684,6 @@ export function WaveformViewer() {
                   >
                     {ticks.map((tick, index) => {
                       const leftPx = (tick.position / duration) * displayWidth
-
-                      if (index === 0) {
-                        console.log('Ruler render - width:', displayWidth, 'zoom:', zoom, 'ticks:', ticks.length)
-                      }
 
                       return (
                         <div
