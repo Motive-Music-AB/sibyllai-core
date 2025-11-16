@@ -25,6 +25,7 @@ export function WaveformViewer() {
   const [waveformWidth, setWaveformWidth] = useState(0)
   const [draggingTimecodes, setDraggingTimecodes] = useState<{ start: string; end: string; startPos: number; endPos: number; activeHandle: 'start' | 'end' | 'both' } | null>(null)
   const dragStartRef = useRef<{ start: number; end: number } | null>(null)
+  const regionCreatedHandlerRef = useRef<((region: any) => void) | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; segmentIndex: number } | null>(null)
 
   const {
@@ -110,43 +111,82 @@ export function WaveformViewer() {
 
   // Ruler now scrolls naturally inside the waveform container - no sync needed!
 
+  // Helper function to update width and ticks - can be called from anywhere
+  const updateWidthAndTicks = useCallback(() => {
+    const ws = wavesurferRef.current
+    if (!ws) return
+
+    const currentZoom = zoomRef.current
+    const wrapper = ws.getWrapper()
+    const duration = ws.getDuration()
+
+    // Calculate width based on zoom level and duration
+    // For zoom=0 (fit mode), use clientWidth (actual container width)
+    // For zoom > 0, calculate as duration * zoom (pixels per second)
+    let calculatedWidth: number
+    if (currentZoom === 0) {
+      calculatedWidth = wrapper?.clientWidth || 0
+    } else {
+      // Calculate expected width: duration (seconds) * zoom (pixels per second)
+      // Don't read from DOM - it may still have the old value during zoom transitions
+      calculatedWidth = duration * currentZoom
+    }
+
+    // Regenerate ticks with current zoom level from ref (synchronous, not React state)
+    const newTicks = generateTicks(duration, currentZoom, framerate, startTimecode)
+
+    console.log('Update width - width:', calculatedWidth, 'zoomRef:', currentZoom, 'zoomState:', zoom, 'ticks:', newTicks.length)
+
+    // Update both width and ticks atomically
+    setWaveformWidth(calculatedWidth)
+    setTicks(newTicks)
+  }, [zoom, framerate, startTimecode])
+
   // Sync width and ticks on WaveSurfer redraw events
   useEffect(() => {
     if (!wavesurferRef.current || !isReady || !waveformRef.current) return
+
+    let previousZoom = zoomRef.current
+    let isZoomChanging = false
 
     const handleRedraw = () => {
       const ws = wavesurferRef.current
       if (!ws) return
 
-      // Get actual width from WaveSurfer's wrapper after render
-      const wrapper = ws.getWrapper()
       const currentZoom = zoomRef.current
-      
-      // For zoom=0 (fit mode), use clientWidth; otherwise use scrollWidth
-      const calculatedWidth = currentZoom === 0 
-        ? (wrapper?.clientWidth || 0)
-        : (wrapper?.scrollWidth || wrapper?.clientWidth || 0)
+      const zoomChanged = currentZoom !== previousZoom
 
-      // Regenerate ticks with current zoom level from ref (synchronous, not React state)
-      // This ensures we use the zoom level that was just applied, not the previous state
-      const duration = ws.getDuration()
-      const newTicks = generateTicks(duration, currentZoom, framerate, startTimecode)
+      // When zoom changes, skip the immediate redraw event
+      // The zoom handlers will manually trigger updateWidthAndTicks after delay
+      if (zoomChanged) {
+        previousZoom = currentZoom
+        isZoomChanging = true
 
-      console.log('Redraw - width:', calculatedWidth, 'zoomRef:', currentZoom, 'zoomState:', zoom, 'ticks:', newTicks.length)
+        // Reset flag after a delay to prevent redraw events from overriding calculated width
+        // Use longer delay for zoom out (DOM takes longer to update)
+        setTimeout(() => {
+          isZoomChanging = false
+        }, 200)
 
-      // Update both width and ticks atomically
-      setWaveformWidth(calculatedWidth)
-      setTicks(newTicks)
+        // Skip this redraw - zoom handlers will handle it
+        return
+      }
+
+      // No zoom change - update width and ticks
+      // Always use updateWidthAndTicks which calculates from duration for non-zero zoom
+      if (!isZoomChanging) {
+        updateWidthAndTicks()
+      }
     }
 
     // Set initial width and ticks
-    handleRedraw()
+    updateWidthAndTicks()
 
     wavesurferRef.current.on('redraw', handleRedraw)
     return () => {
       wavesurferRef.current?.un('redraw', handleRedraw)
     }
-  }, [zoom, isReady, framerate, startTimecode])
+  }, [isReady, framerate, startTimecode, updateWidthAndTicks])
 
   // Helper to check if segment is selected
   const isSegmentSelected = useCallback((start: number, end: number) => {
@@ -282,6 +322,12 @@ export function WaveformViewer() {
   // Update regions when segments, selection, or active cue changes
   useEffect(() => {
     if (!regionsRef.current) return
+
+    // Remove old region-created listener if it exists
+    if (regionCreatedHandlerRef.current) {
+      regionsRef.current.un('region-created', regionCreatedHandlerRef.current)
+      regionCreatedHandlerRef.current = null
+    }
 
     // Clear existing regions
     regionsRef.current.clearRegions()
@@ -437,6 +483,11 @@ export function WaveformViewer() {
       setTimeout(() => {
         if (!regionsRef.current) return
 
+        // Remove old region-created listener if it exists
+        if (regionCreatedHandlerRef.current) {
+          regionsRef.current.un('region-created', regionCreatedHandlerRef.current)
+        }
+
         // Enable drag selection for creating new regions
         regionsRef.current.enableDragSelection({
           color: 'rgba(148, 163, 184, 0.2)',
@@ -455,6 +506,9 @@ export function WaveformViewer() {
             }, 0)
           }
         }
+
+        // Store reference and add listener
+        regionCreatedHandlerRef.current = handleRegionCreated
         regionsRef.current.on('region-created', handleRegionCreated)
       }, (segmentsToRender.length + 1) * 10) // Wait for all regions to be added
     }
@@ -504,10 +558,16 @@ export function WaveformViewer() {
     ws.zoom(newZoom)
     setZoom(newZoom)
 
+    // Update width and ticks immediately (calculation-based, no DOM read needed)
+    updateWidthAndTicks()
+
     // After zoom, recalculate scroll position to keep center time centered
+    // Use requestAnimationFrame to ensure DOM has updated for scroll calculation
     requestAnimationFrame(() => {
       const newWrapper = ws.getWrapper()
-      const newScrollWidth = newWrapper.scrollWidth
+      // Calculate expected width from zoom level
+      const expectedWidth = newZoom === 0 ? newWrapper.clientWidth : duration * newZoom
+      const newScrollWidth = newZoom === 0 ? newWrapper.clientWidth : expectedWidth
 
       // Calculate where the center time is now in pixels
       const newCenterPx = (centerTime / duration) * newScrollWidth
@@ -564,34 +624,26 @@ export function WaveformViewer() {
 
     // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
     zoomRef.current = newZoom
-
-    // WORKAROUND: WaveSurfer has a bug where zoom() doesn't shrink the canvas when zooming out
-    // The only way to make it work is to go to zoom=0 first, then zoom to the target level
-    if (newZoom > 0) {
-      ws.zoom(0)  // First reset to fit-to-width
-      // Wait a tiny bit for the DOM to update
-      setTimeout(() => {
-        ws.zoom(newZoom)  // Then zoom to target level
-      }, 0)
-    } else {
-      ws.zoom(newZoom)  // For zoom=0, just apply directly
-    }
+    ws.zoom(newZoom)
     setZoom(newZoom)
 
+    // Update width and ticks immediately (calculation-based, no DOM read needed)
+    updateWidthAndTicks()
+
     // After zoom, recalculate scroll position to keep center time centered
-    // Always use double RAF for zoom out to ensure DOM has shrunk properly
+    // Use requestAnimationFrame to ensure DOM has updated for scroll calculation
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const newWrapper = ws.getWrapper()
-        const newScrollWidth = newWrapper.scrollWidth
+      const newWrapper = ws.getWrapper()
+      // Calculate expected width from zoom level
+      const expectedWidth = newZoom === 0 ? newWrapper.clientWidth : duration * newZoom
+      const newScrollWidth = newZoom === 0 ? newWrapper.clientWidth : expectedWidth
 
-        // Calculate where the center time is now in pixels
-        const newCenterPx = (centerTime / duration) * newScrollWidth
+      // Calculate where the center time is now in pixels
+      const newCenterPx = (centerTime / duration) * newScrollWidth
 
-        // Scroll to keep it centered
-        const newScrollLeft = newCenterPx - (viewportWidth / 2)
-        newWrapper.scrollLeft = Math.max(0, newScrollLeft)
-      })
+      // Scroll to keep it centered
+      const newScrollLeft = newCenterPx - (viewportWidth / 2)
+      newWrapper.scrollLeft = Math.max(0, newScrollLeft)
     })
   }
 
@@ -604,6 +656,9 @@ export function WaveformViewer() {
     if (wavesurferRef.current) {
       wavesurferRef.current.zoom(0)
     }
+
+    // Update width and ticks immediately (for zoom=0, reads from DOM which is stable)
+    updateWidthAndTicks()
   }
 
   if (!fileId) {

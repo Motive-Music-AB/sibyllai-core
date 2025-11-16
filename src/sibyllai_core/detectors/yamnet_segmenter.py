@@ -77,6 +77,12 @@ def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0):
         return merged
     music_segments = get_segments(music_probs, music_thresh, frame_times)
     music_segments = merge_close_segments(music_segments, min_gap=min_gap)
+
+    # Add padding to compensate for frame granularity (~0.48s)
+    # Extend each segment by 0.5s at start and end to capture missed audio
+    PADDING = 0.5
+    music_segments = [(max(0, start - PADDING), end + PADDING) for start, end in music_segments]
+
     # Clean up temp file if created
     if wav_path == temp_wav and os.path.exists(temp_wav):
         os.remove(temp_wav)

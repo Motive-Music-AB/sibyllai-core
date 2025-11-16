@@ -61,7 +61,7 @@ const initialState = {
   segments: [],
   selectedSegments: [],
   duration: 0,
-  musicThreshold: 0.3,
+  musicThreshold: 0.01,
   minGap: 3.0,
   minCueLength: 3.0,
   isSegmenting: false,

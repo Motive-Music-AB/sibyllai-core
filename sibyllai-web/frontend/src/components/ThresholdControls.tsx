@@ -25,34 +25,25 @@ export function ThresholdControls() {
   const [localMinCueLength, setLocalMinCueLength] = useState(minCueLength)
   const [showSettings, setShowSettings] = useState(false)
 
-  // Debounced preview update
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (localThreshold !== musicThreshold) {
-        setMusicThreshold(localThreshold)
-      }
-      if (localMinGap !== minGap) {
-        setMinGap(localMinGap)
-      }
-      if (localMinCueLength !== minCueLength) {
-        setMinCueLength(localMinCueLength)
-      }
-    }, 300) // 300ms debounce
-
-    return () => clearTimeout(timer)
-  }, [localThreshold, localMinGap, localMinCueLength, musicThreshold, minGap, minCueLength, setMusicThreshold, setMinGap, setMinCueLength])
+  // NO automatic debounced updates - user must click "Update Preview" button
+  // This prevents the segment explosion bug when adjusting sliders
 
   const handlePreview = useCallback(async () => {
     if (!fileId) return
 
     setIsSegmenting(true)
 
+    // Update store with current local values
+    setMusicThreshold(localThreshold)
+    setMinGap(localMinGap)
+    setMinCueLength(localMinCueLength)
+
     try {
       const response = await api.getSegmentPreview({
         file_id: fileId,
-        music_thresh: musicThreshold,
-        min_gap: minGap,
-        min_cue_length: minCueLength,
+        music_thresh: localThreshold,
+        min_gap: localMinGap,
+        min_cue_length: localMinCueLength,
       })
 
       setSegments(response.segments, response.duration)
@@ -61,7 +52,7 @@ export function ThresholdControls() {
     } finally {
       setIsSegmenting(false)
     }
-  }, [fileId, musicThreshold, minGap, minCueLength, setSegments, setIsSegmenting])
+  }, [fileId, localThreshold, localMinGap, localMinCueLength, setSegments, setIsSegmenting, setMusicThreshold, setMinGap, setMinCueLength])
 
   if (!fileId) {
     return null
@@ -112,9 +103,9 @@ export function ThresholdControls() {
               <Slider
                 value={[localThreshold]}
                 onValueChange={([value]) => setLocalThreshold(value)}
-                min={0.000001}
-                max={0.9}
-                step={0.000001}
+                min={0.001}
+                max={0.03}
+                step={0.0001}
                 disabled={isSegmenting}
               />
               <p className="text-xs text-muted-foreground">
