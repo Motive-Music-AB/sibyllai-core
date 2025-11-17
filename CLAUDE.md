@@ -296,6 +296,8 @@ Each run creates an incremental folder to avoid overwriting previous analyses.
 - UI displays CLAP instrumentation instead of YAMNet instruments
 - UI displays CLAP genre instead of Music2Emo moods
 - Both changes provide more accurate, film-music-appropriate tags
+- Smart playback control: First spacebar plays from cue start, subsequent plays from current playhead position
+- Click waveform to set playhead position for precise scrubbing
 
 **Simplified Chord Analysis:**
 - Removed complex chord detection (primary chord, confidence, complexity)

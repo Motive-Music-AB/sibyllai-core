@@ -29,6 +29,7 @@ export function WaveformViewer() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ index: number; x: number; y: number } | null>(null)
   const regionCreatedHandlerRef = useRef<((region: any) => void) | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; segmentIndex: number; splitTime: number } | null>(null)
+  const [hasClickedWaveform, setHasClickedWaveform] = useState(false)
 
   const {
     uploadedFile,
@@ -96,10 +97,12 @@ export function WaveformViewer() {
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
     })
 
-    // Update timecode on click
+    // Update timecode on click and track that waveform was clicked
     ws.on('interaction', () => {
       const currentTime = ws.getCurrentTime()
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
+      // Mark that user has clicked on waveform (for playback behavior)
+      setHasClickedWaveform(true)
     })
 
     // Cleanup
@@ -211,6 +214,8 @@ export function WaveformViewer() {
       const cue = findCueForSegment(start, end)
       if (cue) {
         setActiveCueId(cue.id)
+        // Reset waveform click flag when selecting a new cue
+        setHasClickedWaveform(false)
       }
     }
     // Before analysis, do nothing - only the Select button should toggle selection
@@ -241,15 +246,21 @@ export function WaveformViewer() {
 
     const ws = wavesurferRef.current
 
-    // If currently playing this cue, pause
-    if (isPlaying && playingCueId === activeCueId) {
+    // If currently playing, pause
+    if (isPlaying) {
       ws.pause()
       setPlayingCueId(null)
       return
     }
 
-    // Seek to cue start and play
-    ws.seekTo(activeCue.start / ws.getDuration())
+    // If user hasn't clicked on waveform yet, seek to cue start
+    // Otherwise, play from current playhead position
+    if (!hasClickedWaveform) {
+      ws.seekTo(activeCue.start / ws.getDuration())
+      // Mark as clicked after first play, so subsequent plays use current position
+      setHasClickedWaveform(true)
+    }
+
     ws.play()
     setPlayingCueId(activeCueId)
 
