@@ -23,10 +23,11 @@ export function WaveformViewer() {
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
   const [ticks, setTicks] = useState<Array<{ position: number; timecode: string; isMajor: boolean }>>([])
   const [waveformWidth, setWaveformWidth] = useState(0)
-  const [draggingTimecodes, setDraggingTimecodes] = useState<{ start: string; end: string; startPos: number; endPos: number; activeHandle: 'start' | 'end' | 'both' } | null>(null)
+  const [draggingTimecodes, setDraggingTimecodes] = useState<{ start: string; end: string; startPos: number; endPos: number; activeHandle: 'start' | 'end' | 'both'; mouseX?: number; mouseY?: number } | null>(null)
   const dragStartRef = useRef<{ start: number; end: number } | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ index: number; x: number; y: number } | null>(null)
   const regionCreatedHandlerRef = useRef<((region: any) => void) | null>(null)
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; segmentIndex: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; segmentIndex: number; splitTime: number } | null>(null)
 
   const {
     uploadedFile,
@@ -301,17 +302,19 @@ export function WaveformViewer() {
     }
   }, [contextMenu])
 
-  // Handle split cue at playhead
-  const handleSplitAtPlayhead = (segmentIndex: number) => {
-    if (!wavesurferRef.current) return
-    const currentTime = wavesurferRef.current.getCurrentTime()
-    splitSegment(segmentIndex, currentTime)
+  // Handle split cue at mouse position
+  const handleSplitAtMouse = (segmentIndex: number, splitTime: number) => {
+    splitSegment(segmentIndex, splitTime)
     setContextMenu(null)
   }
 
-  // Handle delete cue
-  const handleDeleteCue = (segmentIndex: number) => {
-    deleteSegment(segmentIndex)
+  // Handle delete cue - show confirmation dialog
+  const handleDeleteCue = (segmentIndex: number, x: number, y: number) => {
+    setDeleteConfirm({
+      index: segmentIndex,
+      x,
+      y
+    })
     setContextMenu(null)
   }
 
@@ -398,10 +401,29 @@ export function WaveformViewer() {
           }
         })
 
-        // Prevent default context menu on region
+        // Right-click to show context menu (split/delete)
         if (!project && region.element) {
           region.element.addEventListener('contextmenu', (e) => {
             e.preventDefault()
+
+            // Calculate the time position where the click occurred
+            const ws = wavesurferRef.current
+            if (!ws) return
+
+            const rect = waveformRef.current?.getBoundingClientRect()
+            if (!rect) return
+
+            const clickX = e.clientX - rect.left
+            const duration = ws.getDuration()
+            const clickTime = (clickX / rect.width) * duration
+
+            // Show context menu with split/delete options
+            setContextMenu({
+              segmentIndex: actualIndex,
+              x: e.clientX,
+              y: e.clientY,
+              splitTime: clickTime
+            })
           })
         }
 
@@ -513,6 +535,24 @@ export function WaveformViewer() {
       }, (segmentsToRender.length + 1) * 10) // Wait for all regions to be added
     }
   }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, zoom, addSegment, isSegmentSelected, findCueForSegment, handleSegmentClick])
+
+  // Track mouse position during dragging
+  useEffect(() => {
+    if (!draggingTimecodes) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (draggingTimecodes) {
+        setDraggingTimecodes(prev => prev ? {
+          ...prev,
+          mouseX: e.clientX,
+          mouseY: e.clientY
+        } : null)
+      }
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    return () => window.removeEventListener('mousemove', handleMouseMove)
+  }, [draggingTimecodes])
 
   const handlePlayPause = () => {
     if (wavesurferRef.current) {
@@ -769,50 +809,21 @@ export function WaveformViewer() {
 
               <div ref={waveformRef} className="w-full" />
 
-              {/* Dragging timecode tooltips - positioned above handles */}
-              {draggingTimecodes && (
-                <>
-                  {draggingTimecodes.activeHandle === 'both' ? (
-                    /* Combined tooltip when dragging whole region */
-                    <div
-                      className="absolute top-2 bg-blue-600 text-white px-3 py-2 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
-                      style={{
-                        left: `${(draggingTimecodes.startPos + draggingTimecodes.endPos) / 2}px`,
-                        transform: 'translateX(-50%)',
-                        zIndex: 52
-                      }}
-                    >
-                      <div>Start: {draggingTimecodes.start}</div>
-                      <div>End: {draggingTimecodes.end}</div>
-                    </div>
-                  ) : (
-                    /* Separate tooltips when dragging individual handles */
-                    <>
-                      {/* Start handle tooltip */}
-                      <div
-                        className="absolute top-2 bg-blue-600 text-white px-2 py-1 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
-                        style={{
-                          left: `${draggingTimecodes.startPos}px`,
-                          transform: 'translateX(-50%)',
-                          zIndex: draggingTimecodes.activeHandle === 'start' ? 52 : 50
-                        }}
-                      >
-                        {draggingTimecodes.start}
-                      </div>
-                      {/* End handle tooltip */}
-                      <div
-                        className="absolute top-2 bg-blue-600 text-white px-2 py-1 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
-                        style={{
-                          left: `${draggingTimecodes.endPos}px`,
-                          transform: 'translateX(-50%)',
-                          zIndex: draggingTimecodes.activeHandle === 'end' ? 52 : 50
-                        }}
-                      >
-                        {draggingTimecodes.end}
-                      </div>
-                    </>
-                  )}
-                </>
+              {/* Dragging timecode tooltips - bottom-right corner near mouse cursor */}
+              {draggingTimecodes && draggingTimecodes.mouseX !== undefined && draggingTimecodes.mouseY !== undefined && (
+                <div
+                  className="fixed bg-white border border-gray-300 rounded-lg shadow-xl px-3 py-2 pointer-events-none text-sm font-mono whitespace-nowrap"
+                  style={{
+                    left: `${draggingTimecodes.mouseX}px`,
+                    top: `${draggingTimecodes.mouseY}px`,
+                    transform: 'translate(calc(-100% - 12px), calc(-100% - 12px))',
+                    zIndex: 9999
+                  }}
+                >
+                  {draggingTimecodes.activeHandle === 'start' && draggingTimecodes.start}
+                  {draggingTimecodes.activeHandle === 'end' && draggingTimecodes.end}
+                  {draggingTimecodes.activeHandle === 'both' && `${draggingTimecodes.start} - ${draggingTimecodes.end}`}
+                </div>
               )}
             </div>
           </div>
@@ -881,29 +892,79 @@ export function WaveformViewer() {
 
           {/* Context Menu */}
           {contextMenu && (
-            <div
-              className="fixed bg-white border border-gray-300 rounded-md shadow-lg py-1 z-50"
-              style={{
-                left: `${contextMenu.x}px`,
-                top: `${contextMenu.y}px`,
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
-                onClick={() => handleSplitAtPlayhead(contextMenu.segmentIndex)}
+            <>
+              {/* Backdrop to close on click */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setContextMenu(null)}
+              />
+
+              <div
+                className="fixed bg-white border border-gray-300 rounded-md shadow-lg py-1 z-50"
+                style={{
+                  left: `${contextMenu.x}px`,
+                  top: `${contextMenu.y}px`,
+                }}
+                onClick={(e) => e.stopPropagation()}
               >
-                <span>✂️</span>
-                <span>Split at Playhead</span>
-              </button>
-              <button
-                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 text-red-600"
-                onClick={() => handleDeleteCue(contextMenu.segmentIndex)}
+                <button
+                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+                  onClick={() => handleSplitAtMouse(contextMenu.segmentIndex, contextMenu.splitTime)}
+                >
+                  <span>✂️</span>
+                  <span>Split cue</span>
+                </button>
+                <button
+                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 text-red-600"
+                  onClick={() => handleDeleteCue(contextMenu.segmentIndex, contextMenu.x, contextMenu.y)}
+                >
+                  <span>🗑️</span>
+                  <span>Delete cue</span>
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Delete Confirmation Tooltip */}
+          {deleteConfirm && (
+            <>
+              {/* Backdrop to close on click */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setDeleteConfirm(null)}
+              />
+
+              {/* Tooltip */}
+              <div
+                className="fixed bg-white border border-gray-300 rounded-lg shadow-xl p-4 z-50"
+                style={{
+                  left: `${deleteConfirm.x}px`,
+                  top: `${deleteConfirm.y}px`,
+                  transform: 'translate(-50%, -100%)',
+                  marginTop: '-8px'
+                }}
+                onClick={(e) => e.stopPropagation()}
               >
-                <span>🗑️</span>
-                <span>Delete Cue</span>
-              </button>
-            </div>
+                <p className="text-sm mb-3">Delete this cue?</p>
+                <div className="flex gap-2">
+                  <button
+                    className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded"
+                    onClick={() => setDeleteConfirm(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded"
+                    onClick={() => {
+                      deleteSegment(deleteConfirm.index)
+                      setDeleteConfirm(null)
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </CardContent>

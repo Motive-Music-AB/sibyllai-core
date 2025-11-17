@@ -139,6 +139,56 @@ This separation allows future reverse-lookup: "Find tracks in my library matchin
 - Add docstrings to all public functions/classes/modules
 - Add comments for non-obvious logic
 
+## UI Design Guidelines
+
+### Tooltip Implementation
+
+When implementing tooltips in the React frontend:
+
+**Positioning:**
+- Use `position: fixed` with viewport coordinates (`e.clientX`, `e.clientY`)
+- NEVER use `position: absolute` with container-relative coordinates - causes positioning mismatches
+- Track mouse position with `window.addEventListener('mousemove')` and update state
+- Clean up event listeners in useEffect return function
+
+**Styling:**
+- Match application design language: white background, gray border, shadow-xl
+- Use TailwindCSS classes: `bg-white border border-gray-300 rounded-lg shadow-xl`
+- Position tooltip above cursor: `transform: translate(-50%, calc(-100% - 8px))`
+- Add high z-index for visibility: `z-index: 9999`
+- Use `pointer-events-none` for non-interactive tooltips
+
+**Example:**
+```tsx
+// State
+const [tooltipData, setTooltipData] = useState<{ x: number; y: number; text: string } | null>(null)
+
+// Mouse tracking
+useEffect(() => {
+  if (!tooltipData) return
+  const handleMouseMove = (e: MouseEvent) => {
+    setTooltipData(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)
+  }
+  window.addEventListener('mousemove', handleMouseMove)
+  return () => window.removeEventListener('mousemove', handleMouseMove)
+}, [tooltipData])
+
+// Render
+{tooltipData && (
+  <div
+    className="fixed bg-white border border-gray-300 rounded-lg shadow-xl px-3 py-2 pointer-events-none"
+    style={{
+      left: `${tooltipData.x}px`,
+      top: `${tooltipData.y}px`,
+      transform: 'translate(-50%, calc(-100% - 8px))',
+      zIndex: 9999
+    }}
+  >
+    {tooltipData.text}
+  </div>
+)}
+```
+
 ## Error Handling Philosophy
 
 The pipeline is designed to be resilient:
