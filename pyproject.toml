@@ -88,7 +88,7 @@ dependencies = [
     "orjson==3.10.18",
     "packaging==25.0",
     "pandas==2.2.3",
-    "pillow==11.2.1",
+    "pillow==11.3.0",
     "platformdirs==4.3.8",
     "pooch==1.8.2",
     "pretty_midi==0.2.10",
