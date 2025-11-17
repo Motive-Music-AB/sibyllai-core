@@ -120,8 +120,9 @@ def detect_chords_simple(audio_data: np.ndarray, sr: int) -> Dict[str, any]:
         if audio_mono.dtype != np.float32:
             audio_mono = audio_mono.astype(np.float32)
 
-        # Use Essentia's KeyExtractor
-        key_extractor = KeyExtractor()
+        # Use Essentia's KeyExtractor with correct sample rate
+        # This prevents pitch shift errors when analyzing audio at non-44.1kHz rates
+        key_extractor = KeyExtractor(sampleRate=int(sr))
         key, scale, strength = key_extractor(audio_mono)
 
         # Format key name (capitalize scale: major/minor)
