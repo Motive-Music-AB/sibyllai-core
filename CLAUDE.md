@@ -28,6 +28,26 @@ SibyllAI Core is a music analysis tool for film composers, designed to analyze t
 pip install -e .[dev]
 ```
 
+### Running the Web App (Development)
+
+**⚠️ CRITICAL: BACKEND MUST ALWAYS RUN ON PORT 8001 ⚠️**
+
+The Vite proxy configuration is hardcoded to forward `/api` requests to `localhost:8001`. Using any other port will cause upload/analysis to freeze with no error messages.
+
+```bash
+# Backend (from project root) - ALWAYS PORT 8001
+cd sibyllai-web/backend && python3 -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8001
+
+# Frontend (from project root) - ALWAYS PORT 5173 (default)
+cd sibyllai-web/frontend && npm run dev
+```
+
+**NEVER use port 8000, 8002, or any other port for development backend.**
+
+If you need to change the port, update BOTH:
+1. `sibyllai-web/frontend/vite.config.ts` (proxy target)
+2. The uvicorn command port
+
 ### Running the CLI
 ```bash
 # Basic usage
@@ -277,3 +297,4 @@ Each run creates an incremental folder to avoid overwriting previous analyses.
 - 73 music regions detected
 - Accurate genre/mood/energy classification for film scores
 - All models (YAMNet, CLAP, Music2Emo, Essentia) working correctly
+- always use port 8001 for this app

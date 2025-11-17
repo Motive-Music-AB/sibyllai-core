@@ -13,11 +13,14 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8002',
+        // ⚠️ CRITICAL: Backend MUST run on port 8001
+        // Changing this port requires updating the backend uvicorn command
+        // See sibyllai-web/README.md for details
+        target: 'http://localhost:8001',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8002',
+        target: 'ws://localhost:8001',
         ws: true,
       },
     },

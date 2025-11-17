@@ -30,14 +30,23 @@ sibyllai-web/
 
 ## Setup & Run
 
+### ⚠️ CRITICAL: Port Configuration ⚠️
+
+**The backend MUST run on port 8001** - this is hardcoded in `frontend/vite.config.ts`.
+
+Using any other port will cause:
+- Upload freezes with no error messages
+- Analysis requests to hang indefinitely
+- Silent failures in the frontend
+
 ### Backend
 
 ```bash
 # From project root
 cd sibyllai-web/backend
 
-# Start FastAPI server
-uvicorn api.main:app --reload --host 0.0.0.0 --port 8000
+# Start FastAPI server - MUST USE PORT 8001
+python3 -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 ### Frontend
