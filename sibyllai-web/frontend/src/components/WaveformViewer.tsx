@@ -7,7 +7,7 @@ import { useAppStore } from '@/lib/store'
 import { generateTicks, secondsToTimecode } from '@/lib/timecode'
 
 // Define zoom levels for smoother progression
-const ZOOM_LEVELS = [0, 10, 25, 50, 100]
+const ZOOM_LEVELS = [0, 5, 10, 20, 30, 50, 75, 100, 150]
 
 export function WaveformViewer() {
   const waveformRef = useRef<HTMLDivElement>(null)
@@ -15,6 +15,7 @@ export function WaveformViewer() {
   const regionsRef = useRef<RegionsPlugin | null>(null)
   const rulerRef = useRef<HTMLDivElement>(null)
   const zoomRef = useRef(0) // Synchronous zoom tracking for redraw event handler
+  const pendingScrollRef = useRef<number | null>(null) // Track pending scroll position after zoom
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [isReady, setIsReady] = useState(false)
@@ -60,7 +61,6 @@ export function WaveformViewer() {
       barGap: 1,
       height: 180,
       normalize: true,
-      // fillParent defaults to true - keep it that way for now
     })
 
     // Create regions plugin with drag-to-create enabled
@@ -375,11 +375,48 @@ export function WaveformViewer() {
         color,
         drag: editable,
         resize: editable,
-        content: '',  // Remove number labels
+        content: '',  // Empty content, we'll add button manually
         })
 
         // Add event handlers
-        if (region) {
+        if (region && region.element) {
+          // Create and add select button programmatically
+          const button = document.createElement('button')
+          button.className = 'region-select-btn'
+          button.textContent = selected ? '✓' : 'Select'
+          button.style.cssText = `
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 500;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            z-index: 10;
+            background-color: ${selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(148, 163, 184, 0.7)'};
+            color: white;
+            transition: background-color 0.2s;
+          `
+
+          // Add hover effects
+          button.addEventListener('mouseenter', () => {
+            button.style.opacity = '0.8'
+          })
+          button.addEventListener('mouseleave', () => {
+            button.style.opacity = '1'
+          })
+
+          // Add click handler for select button
+          button.addEventListener('click', (e) => {
+            e.stopPropagation() // Prevent region click
+            toggleSegmentSelection(start, end)
+          })
+
+          // Append button to region element
+          region.element.appendChild(button)
+
           // Click handler
           region.on('click', (e) => {
             // Check if it's a right-click
@@ -566,17 +603,16 @@ export function WaveformViewer() {
     const ws = wavesurferRef.current
     const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
-
-    // Calculate the time position at the center of current view
-    const scrollLeft = wrapper.scrollLeft
     const viewportWidth = wrapper.clientWidth
-    const scrollWidth = wrapper.scrollWidth
+    const currentScrollLeft = wrapper.scrollLeft
 
-    // Center of viewport in pixels
-    const centerPx = scrollLeft + (viewportWidth / 2)
+    // Calculate the center point of the current viewport in time
+    // This works whether audio is playing or not
+    const currentWidth = zoom === 0 ? viewportWidth : duration * zoom
+    const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
+    const centerTime = (viewportCenterPx / currentWidth) * duration
 
-    // Center time position
-    const centerTime = (centerPx / scrollWidth) * duration
+    console.log('DEBUG ZOOM IN - centerTime:', centerTime, 'duration:', duration, 'currentScrollLeft:', currentScrollLeft)
 
     // Find current zoom level index - try exact match first, then find lowest level >= zoom
     let currentIndex = ZOOM_LEVELS.findIndex(level => level === zoom)
@@ -586,7 +622,7 @@ export function WaveformViewer() {
       // If still not found, default to last index
       if (currentIndex === -1) currentIndex = ZOOM_LEVELS.length - 1
     }
-    
+
     // Move to next level (higher zoom)
     const nextIndex = currentIndex < ZOOM_LEVELS.length - 1 ? currentIndex + 1 : ZOOM_LEVELS.length - 1
     const newZoom = ZOOM_LEVELS[nextIndex]
@@ -595,26 +631,73 @@ export function WaveformViewer() {
 
     // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
     zoomRef.current = newZoom
+    console.log('DEBUG ZOOM IN - BEFORE ws.zoom(), wrapper dimensions:', {
+      scrollWidth: wrapper.scrollWidth,
+      clientWidth: wrapper.clientWidth,
+      scrollLeft: wrapper.scrollLeft
+    })
     ws.zoom(newZoom)
+    console.log('DEBUG ZOOM IN - AFTER ws.zoom(), wrapper dimensions:', {
+      scrollWidth: wrapper.scrollWidth,
+      clientWidth: wrapper.clientWidth,
+      scrollLeft: wrapper.scrollLeft
+    })
     setZoom(newZoom)
+
+    // Calculate scroll position immediately (before ws.zoom triggers redraw)
+    // Calculate expected width from zoom level
+    const expectedWidth = newZoom === 0 ? wrapper.clientWidth : duration * newZoom
+
+    // Calculate where the center point is in pixels at the new zoom level
+    const centerPx = (centerTime / duration) * expectedWidth
+
+    // Calculate target scroll position (keep center centered)
+    let targetScrollLeft = centerPx - (viewportWidth / 2)
+
+    // Smart positioning: avoid showing too much empty space at edges
+    const maxScrollLeft = expectedWidth - viewportWidth
+
+    console.log('DEBUG ZOOM IN - scroll calc:', {
+      expectedWidth,
+      centerPx,
+      viewportWidth,
+      targetScrollLeft,
+      maxScrollLeft
+    })
+
+    // If playhead near start, don't scroll past beginning
+    if (targetScrollLeft < 0) {
+      targetScrollLeft = 0
+    }
+    // If playhead near end, don't show empty space beyond waveform
+    else if (targetScrollLeft > maxScrollLeft) {
+      targetScrollLeft = Math.max(0, maxScrollLeft)
+    }
+
+    console.log('DEBUG ZOOM IN - storing pending scroll:', targetScrollLeft)
+    // Store the target scroll position to be applied after redraw
+    pendingScrollRef.current = targetScrollLeft
 
     // Update width and ticks immediately (calculation-based, no DOM read needed)
     updateWidthAndTicks()
 
-    // After zoom, recalculate scroll position to keep center time centered
-    // Use requestAnimationFrame to ensure DOM has updated for scroll calculation
+    // Apply scroll after multiple animation frames to ensure DOM is fully updated
+    // First frame: zoom is applied
     requestAnimationFrame(() => {
-      const newWrapper = ws.getWrapper()
-      // Calculate expected width from zoom level
-      const expectedWidth = newZoom === 0 ? newWrapper.clientWidth : duration * newZoom
-      const newScrollWidth = newZoom === 0 ? newWrapper.clientWidth : expectedWidth
-
-      // Calculate where the center time is now in pixels
-      const newCenterPx = (centerTime / duration) * newScrollWidth
-
-      // Scroll to keep it centered
-      const newScrollLeft = newCenterPx - (viewportWidth / 2)
-      newWrapper.scrollLeft = Math.max(0, newScrollLeft)
+      // Second frame: redraw has happened
+      requestAnimationFrame(() => {
+        // Third frame: all layout calculations complete
+        requestAnimationFrame(() => {
+          if (pendingScrollRef.current !== null) {
+            const newWrapper = ws.getWrapper()
+            console.log('DEBUG ZOOM IN - applying scroll after RAF:', pendingScrollRef.current)
+            console.log('DEBUG ZOOM IN - wrapper scrollWidth:', newWrapper.scrollWidth, 'clientWidth:', newWrapper.clientWidth)
+            newWrapper.scrollLeft = pendingScrollRef.current
+            console.log('DEBUG ZOOM IN - after setting, scrollLeft is now:', newWrapper.scrollLeft)
+            pendingScrollRef.current = null
+          }
+        })
+      })
     })
   }
 
@@ -624,17 +707,16 @@ export function WaveformViewer() {
     const ws = wavesurferRef.current
     const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
-
-    // Calculate the time position at the center of current view
-    const scrollLeft = wrapper.scrollLeft
     const viewportWidth = wrapper.clientWidth
-    const scrollWidth = wrapper.scrollWidth
+    const currentScrollLeft = wrapper.scrollLeft
 
-    // Center of viewport in pixels
-    const centerPx = scrollLeft + (viewportWidth / 2)
+    // Calculate the center point of the current viewport in time
+    // This works whether audio is playing or not
+    const currentWidth = zoom === 0 ? viewportWidth : duration * zoom
+    const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
+    const centerTime = (viewportCenterPx / currentWidth) * duration
 
-    // Center time position
-    const centerTime = (centerPx / scrollWidth) * duration
+    console.log('DEBUG ZOOM OUT - centerTime:', centerTime, 'duration:', duration, 'currentScrollLeft:', currentScrollLeft)
 
     // Find current zoom level index - try exact match first, then find highest level <= zoom
     let currentIndex = ZOOM_LEVELS.findIndex(level => level === zoom)
@@ -667,23 +749,60 @@ export function WaveformViewer() {
     ws.zoom(newZoom)
     setZoom(newZoom)
 
+    // Calculate scroll position immediately (before ws.zoom triggers redraw)
+    // Calculate expected width from zoom level
+    const expectedWidth = newZoom === 0 ? wrapper.clientWidth : duration * newZoom
+
+    // Calculate where the center point is in pixels at the new zoom level
+    const centerPx = (centerTime / duration) * expectedWidth
+
+    // Calculate target scroll position (keep center centered)
+    let targetScrollLeft = centerPx - (viewportWidth / 2)
+
+    // Smart positioning: avoid showing too much empty space at edges
+    const maxScrollLeft = expectedWidth - viewportWidth
+
+    console.log('DEBUG ZOOM OUT - scroll calc:', {
+      expectedWidth,
+      centerPx,
+      viewportWidth,
+      targetScrollLeft,
+      maxScrollLeft
+    })
+
+    // If center near start, don't scroll past beginning
+    if (targetScrollLeft < 0) {
+      targetScrollLeft = 0
+    }
+    // If center near end, don't show empty space beyond waveform
+    else if (targetScrollLeft > maxScrollLeft) {
+      targetScrollLeft = Math.max(0, maxScrollLeft)
+    }
+
+    console.log('DEBUG ZOOM OUT - storing pending scroll:', targetScrollLeft)
+    // Store the target scroll position to be applied after redraw
+    pendingScrollRef.current = targetScrollLeft
+
     // Update width and ticks immediately (calculation-based, no DOM read needed)
     updateWidthAndTicks()
 
-    // After zoom, recalculate scroll position to keep center time centered
-    // Use requestAnimationFrame to ensure DOM has updated for scroll calculation
+    // Apply scroll after multiple animation frames to ensure DOM is fully updated
+    // First frame: zoom is applied
     requestAnimationFrame(() => {
-      const newWrapper = ws.getWrapper()
-      // Calculate expected width from zoom level
-      const expectedWidth = newZoom === 0 ? newWrapper.clientWidth : duration * newZoom
-      const newScrollWidth = newZoom === 0 ? newWrapper.clientWidth : expectedWidth
-
-      // Calculate where the center time is now in pixels
-      const newCenterPx = (centerTime / duration) * newScrollWidth
-
-      // Scroll to keep it centered
-      const newScrollLeft = newCenterPx - (viewportWidth / 2)
-      newWrapper.scrollLeft = Math.max(0, newScrollLeft)
+      // Second frame: redraw has happened
+      requestAnimationFrame(() => {
+        // Third frame: all layout calculations complete
+        requestAnimationFrame(() => {
+          if (pendingScrollRef.current !== null) {
+            const newWrapper = ws.getWrapper()
+            console.log('DEBUG ZOOM OUT - applying scroll after RAF:', pendingScrollRef.current)
+            console.log('DEBUG ZOOM OUT - wrapper scrollWidth:', newWrapper.scrollWidth, 'clientWidth:', newWrapper.clientWidth)
+            newWrapper.scrollLeft = pendingScrollRef.current
+            console.log('DEBUG ZOOM OUT - after setting, scrollLeft is now:', newWrapper.scrollLeft)
+            pendingScrollRef.current = null
+          }
+        })
+      })
     })
   }
 
@@ -709,37 +828,6 @@ export function WaveformViewer() {
     <Card className="w-full">
       <CardContent className="pt-6">
         <div className="space-y-4">
-          {/* Select buttons row - above waveform, only show before analysis */}
-          {!project && isReady && segments.length > 0 && (
-            <div className="relative h-6 w-full">
-              {segments.map(([start, end], index) => {
-                const duration = wavesurferRef.current?.getDuration() || 1
-                const leftPercent = (start / duration) * 100
-                const widthPercent = ((end - start) / duration) * 100
-                const selected = isSegmentSelected(start, end)
-
-                return (
-                  <button
-                    key={index}
-                    onClick={() => toggleSegmentSelection(start, end)}
-                    className="absolute text-xs px-2 py-0.5 rounded transition-colors font-medium flex items-center justify-center"
-                    style={{
-                      left: `${leftPercent}%`,
-                      width: `${widthPercent}%`,
-                      minWidth: '60px',
-                      backgroundColor: selected ? '#22c55e' : '#94a3b8',
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {selected ? '✓' : 'Select'}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
           <div className="overflow-x-auto border rounded-lg">
             {/* Wrapper that contains both ruler and waveform - scrolls as one unit */}
             <div

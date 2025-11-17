@@ -52,6 +52,9 @@ export function calculateIntervals(zoom: number, duration: number): { major: num
       // < 1 minute: major every 5s
       return { major: 5 }
     }
+  } else if (zoom < 10) {
+    // Very zoomed out (< 10 px/sec): major every 30s for readability
+    return { major: 30 }
   } else if (zoom < 50) {
     // Zoomed out: major every 10s
     return { major: 10 }
