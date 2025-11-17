@@ -16,9 +16,20 @@ from sibyllai_core.sibyl_format import create_cue, create_project, save_project
 
 
 def _bpm_track(y, sr):
-    """Extract BPM using Essentia."""
+    """
+    Extract BPM using Essentia's RhythmExtractor2013.
+
+    RhythmExtractor2013 requires exactly 44100 Hz sample rate.
+    If audio is at a different rate, resample it to prevent tempo errors.
+    """
     if y.ndim > 1:
         y = librosa.to_mono(y.T)
+
+    # Resample to 44100 Hz if needed (RhythmExtractor2013 requirement)
+    if sr != 44100:
+        y = librosa.resample(y, orig_sr=sr, target_sr=44100)
+        sr = 44100
+
     return es.RhythmExtractor2013(method="multifeature")(y)[0]
 
 
