@@ -5,7 +5,7 @@ import librosa
 _clap = None
 _text_embeddings = None
 
-# Comprehensive tag taxonomy organized by category (29 tags total)
+# Comprehensive tag taxonomy organized by category (37 tags total)
 CLAP_TAG_CATEGORIES = {
     "genre": [
         "orchestral",
@@ -17,6 +17,16 @@ CLAP_TAG_CATEGORIES = {
         "minimalist",
         "ambient",
         "cinematic percussion"
+    ],
+    "instrumentation": [
+        "brass section",
+        "string ensemble",
+        "woodwinds",
+        "choir vocals",
+        "piano keys",
+        "guitar bass",
+        "synthesizers",
+        "full orchestra"
     ],
     "production": [
         "polished production",

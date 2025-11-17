@@ -154,7 +154,8 @@ def analyse(src: str | Path, out_dir: str | Path, thr: float = 0.5, fps=25):
 
             # Instrument detection via YAMNet
             try:
-                instruments = extract_instruments(music_mono, sr=sr, top_n=5)
+                instruments = extract_instruments(music_mono, sr=sr, top_n=15)
+                print(f"[DEBUG] Detected instruments for segment {i+1}: {instruments}")
             except Exception as e:
                 print(f"[WARNING] Instrument extraction failed for segment {i+1}: {e}")
 

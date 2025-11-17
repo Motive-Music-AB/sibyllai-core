@@ -106,7 +106,8 @@ def analyze_segments(
             try:
                 if progress_callback:
                     progress_callback(i, total_segments, f"Segment {i}: Detecting instruments")
-                instruments = extract_instruments(music_mono, sr=sr, top_n=5)
+                instruments = extract_instruments(music_mono, sr=sr, top_n=15)
+                print(f"[DEBUG] Detected instruments for segment {i}: {instruments}")
             except Exception as e:
                 print(f"[WARNING] Instrument extraction failed for segment {i}: {e}")
 

@@ -57,12 +57,12 @@ export function CueCard({ cue, index }: CueCardProps) {
           {cue.musical_profile.key || 'N/A'}
         </div>
         <div>
-          <span className="text-muted-foreground">Mood:</span>{' '}
-          {cue.musical_profile.curated.moods.slice(0, 2).join(', ') || 'N/A'}
+          <span className="text-muted-foreground">Genre:</span>{' '}
+          {cue.musical_profile.curated.genre.join(', ') || 'N/A'}
         </div>
         <div>
           <span className="text-muted-foreground">Instruments:</span>{' '}
-          {cue.musical_profile.curated.instruments.slice(0, 2).join(', ') || 'N/A'}
+          {cue.musical_profile.curated.instrumentation.join(', ') || 'N/A'}
         </div>
       </div>
     </Card>

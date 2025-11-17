@@ -272,21 +272,30 @@ Each run creates an incremental folder to avoid overwriting previous analyses.
 - Suitable for production feature film MX analysis
 
 **Enhanced CLAP Analysis:**
-- Expanded from 5 to 29 categorized tags
-- Tags organized into: genre, production, energy, era, function
+- Expanded from 5 to 37 categorized tags
+- Tags organized into: genre, production, energy, era, function, **instrumentation**
+- Added ensemble-level instrumentation detection (brass section, string ensemble, woodwinds, etc.)
 - Pre-computed text embeddings for performance optimization
+- CLAP provides 6-13% confidence for orchestral film music (10-13x better than YAMNet for ensemble detection)
 
 **YAMNet Instrument Detection:**
 - Added extract_instruments() function
-- Detects top 5 instruments per segment from 521 audio classes
+- Detects top 15 instruments per segment from 521 audio classes
 - Returns confidence scores for each detected instrument
+- Note: YAMNet shows low confidence (<1%) for orchestral ensembles; CLAP instrumentation preferred for film music
 
 **New .sibyl Project Format:**
 - Structured JSON format with versioning
 - Separates musical_profile (universal, searchable) from project_context (project-specific notes)
 - Detected (all scores) vs curated (top items) for UI flexibility
+- Curated lists: 8 instruments, 2 genres, 3 instrumentation tags, 2 moods
 - Includes timecode conversion (HH:MM:SS:FF)
 - Backwards-compatible CSV output maintained
+
+**Web UI Updates:**
+- UI displays CLAP instrumentation instead of YAMNet instruments
+- UI displays CLAP genre instead of Music2Emo moods
+- Both changes provide more accurate, film-music-appropriate tags
 
 **Simplified Chord Analysis:**
 - Removed complex chord detection (primary chord, confidence, complexity)

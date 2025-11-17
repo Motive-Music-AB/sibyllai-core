@@ -64,7 +64,7 @@ def create_cue(
         sorted_items = sorted(items.items(), key=lambda x: x[1], reverse=True)
         return [item[0] for item in sorted_items[:n]]
 
-    curated_instruments = get_top_n(instruments, 3) if instruments else []
+    curated_instruments = get_top_n(instruments, 8) if instruments else []
     curated_moods = moods[:2] if moods else []  # Top 2 moods
 
     # Extract top tags per CLAP category
@@ -72,6 +72,8 @@ def create_cue(
     for category, tags in clap_categorized.items():
         if category == "genre":
             curated_clap["genre"] = get_top_n(tags, 2)
+        elif category == "instrumentation":
+            curated_clap["instrumentation"] = get_top_n(tags, 3)
         elif category == "production":
             curated_clap["production"] = get_top_n(tags, 1)
         elif category == "energy":
@@ -94,6 +96,7 @@ def create_cue(
                 "instruments_yamnet": instruments,
                 "moods": {mood: 1.0 for mood in moods},  # Music2Emo doesn't provide scores per mood
                 "clap_genre": clap_categorized.get("genre", {}),
+                "clap_instrumentation": clap_categorized.get("instrumentation", {}),
                 "clap_production": clap_categorized.get("production", {}),
                 "clap_energy": clap_categorized.get("energy", {}),
                 "clap_era": clap_categorized.get("era", {}),
@@ -103,6 +106,7 @@ def create_cue(
                 "instruments": curated_instruments,
                 "moods": curated_moods,
                 "genre": curated_clap.get("genre", []),
+                "instrumentation": curated_clap.get("instrumentation", []),
                 "production": curated_clap.get("production", []),
                 "energy": curated_clap.get("energy", []),
                 "era": curated_clap.get("era", []),
