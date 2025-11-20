@@ -10,6 +10,24 @@ This repository contains the core engine for Motive-AI, an audio-spotting and mo
 
 ---
 
+## How It Works (High-Level Flow)
+
+**Input → Analysis → Output**
+
+1. **CLI Entry** - User provides video/audio file via command line
+2. **Audio Extraction** - ffmpeg converts to mono 44.1kHz WAV
+3. **Cue Detection** - YAMNet scans entire file to find where music starts/stops
+4. **Per-Cue BPM** - Essentia analyzes tempo for each detected music segment
+5. **Per-Cue Key** - Essentia extracts harmonic key information
+6. **Per-Cue Instruments** - YAMNet detects individual instruments from 521 audio classes
+7. **Per-Cue Genre/Style/Energy** - CLAP classifies across 37 categorized tags (genre, production, energy, era, orchestration)
+8. **Per-Cue Mood** - Music2Emo analyzes valence, arousal, and emotional tags
+9. **Output** - Generates `project.sibyl.json` with all cue data (musical_profile + project_context)
+
+**Web UI flow**: Upload → Same backend pipeline → Display cues with waveforms + tags → Playback/editing
+
+---
+
 ## Tech Stack
 - **Python 3.11+**
 - **PyTorch** (deep learning, model inference)
