@@ -29,7 +29,6 @@ export function WaveformViewer() {
   const [deleteConfirm, setDeleteConfirm] = useState<{ index: number; x: number; y: number } | null>(null)
   const regionCreatedHandlerRef = useRef<((region: any) => void) | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; segmentIndex: number; splitTime: number } | null>(null)
-  const [hasClickedWaveform, setHasClickedWaveform] = useState(false)
 
   const {
     uploadedFile,
@@ -97,12 +96,10 @@ export function WaveformViewer() {
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
     })
 
-    // Update timecode on click and track that waveform was clicked
+    // Update timecode on click
     ws.on('interaction', () => {
       const currentTime = ws.getCurrentTime()
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
-      // Mark that user has clicked on waveform (for playback behavior)
-      setHasClickedWaveform(true)
     })
 
     // Cleanup
@@ -214,8 +211,9 @@ export function WaveformViewer() {
       const cue = findCueForSegment(start, end)
       if (cue) {
         setActiveCueId(cue.id)
-        // Reset waveform click flag when selecting a new cue
-        setHasClickedWaveform(false)
+      } else {
+        // Clear active cue if clicking on unanalyzed segment
+        setActiveCueId(null)
       }
     }
     // Before analysis, do nothing - only the Select button should toggle selection
@@ -253,14 +251,7 @@ export function WaveformViewer() {
       return
     }
 
-    // If user hasn't clicked on waveform yet, seek to cue start
-    // Otherwise, play from current playhead position
-    if (!hasClickedWaveform) {
-      ws.seekTo(activeCue.start / ws.getDuration())
-      // Mark as clicked after first play, so subsequent plays use current position
-      setHasClickedWaveform(true)
-    }
-
+    // Play from current playhead position
     ws.play()
     setPlayingCueId(activeCueId)
 

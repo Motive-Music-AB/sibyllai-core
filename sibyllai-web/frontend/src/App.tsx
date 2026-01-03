@@ -18,7 +18,7 @@ function App() {
       <div className="max-w-[1800px] mx-auto space-y-8">
         {/* Header */}
         <header className="text-center space-y-2">
-          <h1 className="text-4xl font-bold">SibyllAI</h1>
+          <h1 className="text-4xl font-bold">Motive</h1>
           <p className="text-muted-foreground">
             Music Analysis for MX & Media Files
           </p>
