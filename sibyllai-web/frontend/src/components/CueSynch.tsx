@@ -24,6 +24,7 @@ export function CueSynch() {
 
   const [file, setFile] = useState<File | null>(null)
   const [frameRateSetting] = useState<string>('auto')
+  const [sampleRate, setSampleRate] = useState<number>(48000)
   const [cueData, setCueData] = useState<CueData | null>(null)
   const [timeColumn, setTimeColumn] = useState<string>('')
   const [selectedFields, setSelectedFields] = useState<string[]>([])
@@ -147,9 +148,10 @@ export function CueSynch() {
         throw new Error('No valid markers found')
       }
 
-      const blob = generateWavWithMarkers(markers)
+      const blob = generateWavWithMarkers(markers, sampleRate)
       const baseName = cueData.sourceName.replace(/\.(csv|wav|mp3|m4a)$/i, '')
-      const filename = `${baseName}_marker_list.wav`
+      const rateLabel = sampleRate === 44100 ? '44k' : sampleRate === 48000 ? '48k' : '96k'
+      const filename = `${baseName}_markers_${rateLabel}.wav`
       downloadBlob(blob, filename)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate WAV file')
@@ -273,6 +275,35 @@ export function CueSynch() {
       {cueData && cueData.headers && (
         <div className="bg-card rounded-lg p-4 border">
           <h2 className="font-medium mb-4">Configure Markers</h2>
+
+          {/* Sample Rate Selection */}
+          <div className="mb-4">
+            <p className="text-sm text-muted-foreground mb-2">
+              Sample Rate
+            </p>
+            <div className="flex gap-2">
+              {[44100, 48000, 96000].map((rate) => (
+                <label
+                  key={rate}
+                  className={`inline-flex items-center px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm ${
+                    sampleRate === rate
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted hover:bg-muted/80'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="sampleRate"
+                    value={rate}
+                    checked={sampleRate === rate}
+                    onChange={() => setSampleRate(rate)}
+                    className="hidden"
+                  />
+                  <span>{rate === 44100 ? '44.1' : rate / 1000} kHz</span>
+                </label>
+              ))}
+            </div>
+          </div>
 
           {/* Marker Fields Selection */}
           <div className="mb-4">

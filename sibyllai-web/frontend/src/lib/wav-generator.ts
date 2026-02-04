@@ -8,10 +8,11 @@ import type { Marker } from './csv-parser';
 
 /**
  * Generate a WAV file Blob with embedded markers (cue points)
+ * @param markers Array of markers with time and name
+ * @param sampleRate Sample rate in Hz (44100, 48000, or 96000)
  */
-export function generateWavWithMarkers(markers: Marker[]): Blob {
+export function generateWavWithMarkers(markers: Marker[], sampleRate: number = 48000): Blob {
   // Audio parameters
-  const sampleRate = 44100;
   const numChannels = 2;
   const bitsPerSample = 16;
   const bytesPerSample = bitsPerSample / 8;

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions'
 import { Card, CardContent } from '@/components/ui/card'
@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 import { generateTicks, secondsToTimecode } from '@/lib/timecode'
 
+// Define zoom levels for smoother progression
 /**
  * ZOOM LEVELS - pixels per second
  *
@@ -32,19 +33,19 @@ export function WaveformViewer() {
   const regionsRef = useRef<RegionsPlugin | null>(null)
   const rulerRef = useRef<HTMLDivElement>(null)
   const zoomRef = useRef(0) // Synchronous zoom tracking for redraw event handler
+  const pendingScrollRef = useRef<number | null>(null) // Track pending scroll position after zoom
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [isReady, setIsReady] = useState(false)
   const [zoom, setZoom] = useState(0)
-  const [playingCueId, setPlayingCueId] = useState<string | null>(null)
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
   const [ticks, setTicks] = useState<Array<{ position: number; timecode: string; isMajor: boolean }>>([])
   const [waveformWidth, setWaveformWidth] = useState(0)
-  const [fallbackWidth, setFallbackWidth] = useState(0) // Fallback width calculated in useLayoutEffect to avoid DOM reads during render
-  const [draggingTimecodes, setDraggingTimecodes] = useState<{ start: string; end: string; startPos: number; endPos: number; activeHandle: 'start' | 'end' | 'both' } | null>(null)
+  const [draggingTimecodes, setDraggingTimecodes] = useState<{ start: string; end: string; startPos: number; endPos: number; activeHandle: 'start' | 'end' | 'both'; mouseX?: number; mouseY?: number } | null>(null)
   const dragStartRef = useRef<{ start: number; end: number } | null>(null)
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; segmentIndex: number } | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ index: number; x: number; y: number } | null>(null)
   const regionCreatedHandlerRef = useRef<((region: any) => void) | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; segmentIndex: number; splitTime: number } | null>(null)
 
   const {
     uploadedFile,
@@ -59,6 +60,8 @@ export function WaveformViewer() {
     project,
     activeCueId,
     setActiveCueId,
+    playingCueId,
+    setPlayingCueId,
     startTimecode,
     framerate,
   } = useAppStore()
@@ -77,7 +80,6 @@ export function WaveformViewer() {
       barGap: 1,
       height: 180,
       normalize: true,
-      backend: 'WebAudio',
     })
 
     // Create regions plugin with drag-to-create enabled
@@ -137,7 +139,7 @@ export function WaveformViewer() {
     const currentZoom = zoomRef.current
     const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
-    
+
     // Calculate width based on zoom level and duration
     // For zoom=0 (fit mode), use clientWidth (actual container width)
     // For zoom > 0, calculate as duration * zoom (pixels per second)
@@ -179,13 +181,13 @@ export function WaveformViewer() {
       if (zoomChanged) {
         previousZoom = currentZoom
         isZoomChanging = true
-        
+
         // Reset flag after a delay to prevent redraw events from overriding calculated width
         // Use longer delay for zoom out (DOM takes longer to update)
         setTimeout(() => {
           isZoomChanging = false
         }, 200)
-        
+
         // Skip this redraw - zoom handlers will handle it
         return
       }
@@ -205,29 +207,6 @@ export function WaveformViewer() {
       wavesurferRef.current?.un('redraw', handleRedraw)
     }
   }, [isReady, framerate, startTimecode, updateWidthAndTicks])
-
-  // Calculate fallback width in useLayoutEffect to avoid DOM reads during render
-  // This prevents React warning about state updates during render
-  useLayoutEffect(() => {
-    if (!isReady || waveformWidth > 0) {
-      // If we have a valid width from handleRedraw, don't calculate fallback
-      setFallbackWidth(0)
-      return
-    }
-
-    // Only calculate fallback if waveformWidth is 0 or invalid
-    const wrapper = wavesurferRef.current?.getWrapper()
-    if (zoom === 0) {
-      // In fit mode, use container width
-      const container = waveformRef.current?.parentElement
-      const width = container?.clientWidth || wrapper?.clientWidth || 0
-      setFallbackWidth(width)
-    } else {
-      // In zoom mode, use scroll width
-      const width = wrapper?.scrollWidth || wrapper?.clientWidth || 0
-      setFallbackWidth(width)
-    }
-  }, [isReady, waveformWidth, zoom])
 
   // Helper to check if segment is selected
   const isSegmentSelected = useCallback((start: number, end: number) => {
@@ -251,6 +230,9 @@ export function WaveformViewer() {
       const cue = findCueForSegment(start, end)
       if (cue) {
         setActiveCueId(cue.id)
+      } else {
+        // Clear active cue if clicking on unanalyzed segment
+        setActiveCueId(null)
       }
     }
     // Before analysis, do nothing - only the Select button should toggle selection
@@ -273,7 +255,7 @@ export function WaveformViewer() {
   }
 
   // Play a specific cue
-  const playActiveCue = () => {
+  const playActiveCue = useCallback(() => {
     if (!wavesurferRef.current || !activeCueId || !project) return
 
     const activeCue = project.cues.find((cue) => cue.id === activeCueId)
@@ -281,15 +263,15 @@ export function WaveformViewer() {
 
     const ws = wavesurferRef.current
 
-    // If currently playing this cue, pause
-    if (isPlaying && playingCueId === activeCueId) {
+    // If currently playing, pause
+    if (isPlaying) {
       ws.pause()
       setPlayingCueId(null)
       return
     }
 
     // Seek to cue start and play
-    ws.seekTo(activeCue.start / ws.getDuration())
+    ws.setTime(activeCue.start)
     ws.play()
     setPlayingCueId(activeCueId)
 
@@ -305,7 +287,7 @@ export function WaveformViewer() {
     ws.once('pause', () => {
       ws.un('audioprocess', checkPosition)
     })
-  }
+  }, [activeCueId, project, isPlaying, setPlayingCueId])
 
   // Handle spacebar to play/pause waveform or active cue
   useEffect(() => {
@@ -330,8 +312,7 @@ export function WaveformViewer() {
 
     window.addEventListener('keydown', handleKeyPress)
     return () => window.removeEventListener('keydown', handleKeyPress)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCueId, project, isPlaying, playingCueId])
+  }, [activeCueId, project, playActiveCue])
 
   // Close context menu on click outside
   useEffect(() => {
@@ -342,48 +323,19 @@ export function WaveformViewer() {
     }
   }, [contextMenu])
 
-  // Setup drag-to-create separately from region rendering
-  useEffect(() => {
-    if (!regionsRef.current) return
-
-    const shouldEnableDragCreate = !project && segments.length > 0
-
-    if (shouldEnableDragCreate && !regionCreatedHandlerRef.current) {
-      // Enable drag selection for creating new regions
-      regionsRef.current.enableDragSelection({
-        color: 'rgba(148, 163, 184, 0.2)',
-      })
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const handleRegionCreated = (region: any) => {
-        // Batch the state update
-        requestAnimationFrame(() => {
-          addSegment(region.start, region.end)
-        })
-      }
-
-      regionCreatedHandlerRef.current = handleRegionCreated
-      regionsRef.current.on('region-created', handleRegionCreated)
-    }
-
-    // Cleanup when switching to analysis mode
-    if (project && regionCreatedHandlerRef.current) {
-      regionsRef.current?.off('region-created', regionCreatedHandlerRef.current)
-      regionCreatedHandlerRef.current = null
-    }
-  }, [project, segments.length, addSegment])
-
-  // Handle split cue at playhead
-  const handleSplitAtPlayhead = (segmentIndex: number) => {
-    if (!wavesurferRef.current) return
-    const currentTime = wavesurferRef.current.getCurrentTime()
-    splitSegment(segmentIndex, currentTime)
+  // Handle split cue at mouse position
+  const handleSplitAtMouse = (segmentIndex: number, splitTime: number) => {
+    splitSegment(segmentIndex, splitTime)
     setContextMenu(null)
   }
 
-  // Handle delete cue
-  const handleDeleteCue = (segmentIndex: number) => {
-    deleteSegment(segmentIndex)
+  // Handle delete cue - show confirmation dialog
+  const handleDeleteCue = (segmentIndex: number, x: number, y: number) => {
+    setDeleteConfirm({
+      index: segmentIndex,
+      x,
+      y
+    })
     setContextMenu(null)
   }
 
@@ -395,66 +347,146 @@ export function WaveformViewer() {
   useEffect(() => {
     if (!regionsRef.current) return
 
+    // Remove old region-created listener if it exists
+    if (regionCreatedHandlerRef.current) {
+      regionsRef.current.un('region-created', regionCreatedHandlerRef.current)
+      regionCreatedHandlerRef.current = null
+    }
+
     // Clear existing regions
     regionsRef.current.clearRegions()
 
     if (segments.length === 0) return
 
+    // Safety check: Limit number of regions to prevent freezing
+    const MAX_REGIONS = 20
+    const segmentsToRender = segments.slice(0, MAX_REGIONS)
+
+    if (segments.length > MAX_REGIONS) {
+      console.warn(`Too many segments (${segments.length}). Only rendering first ${MAX_REGIONS}. Increase threshold to detect fewer cues.`)
+    }
+
     // Add new regions with appropriate styling
-    segments.forEach(([start, end], index) => {
-      const selected = isSegmentSelected(start, end)
-      const cue = findCueForSegment(start, end)
-      const isActive = cue && activeCueId === cue.id
+    // Use setTimeout with index to add regions asynchronously, preventing UI freeze
+    segmentsToRender.forEach(([start, end], index) => {
+      setTimeout(() => {
+        if (!regionsRef.current) return
 
-      // Determine color based on state
-      let color: string
-      if (isActive) {
-        color = 'rgba(59, 130, 246, 0.5)' // Bright blue for active
-      } else if (selected) {
-        color = 'rgba(34, 197, 94, 0.3)' // Green for selected
-      } else {
-        color = 'rgba(148, 163, 184, 0.2)' // Light gray for unselected
-      }
+        const actualIndex = segments.findIndex(([s, e]) => s === start && e === end)
+        const selected = isSegmentSelected(start, end)
+        const cue = findCueForSegment(start, end)
+        const isActive = cue && activeCueId === cue.id
 
-      // Enable dragging/resizing only before analysis
-      const editable = !project
+        // Determine color based on state
+        let color: string
+        if (isActive) {
+          color = 'rgba(59, 130, 246, 0.5)' // Bright blue for active
+        } else if (selected) {
+          color = 'rgba(34, 197, 94, 0.3)' // Green for selected
+        } else {
+          color = 'rgba(148, 163, 184, 0.2)' // Light gray for unselected
+        }
 
-      const region = regionsRef.current?.addRegion({
+        // Enable dragging/resizing only before analysis
+        const editable = !project
+
+        const region = regionsRef.current?.addRegion({
         start,
         end,
         color,
         drag: editable,
         resize: editable,
-        content: '',  // Remove number labels
-      })
+        content: '',  // Empty content, we'll add button manually
+        })
 
-      // Add event handlers
-      if (region) {
-        // Click handler
-        region.on('click', (e) => {
-          // Check if it's a right-click
-          if (e.button === 2) {
-            e.preventDefault()
-            e.stopPropagation()
+        // Add event handlers
+        if (region && region.element) {
+          // Add visual separation between adjacent cues (border on both sides)
+          region.element.style.borderLeft = '2px solid rgba(100, 116, 139, 0.6)'
+          region.element.style.borderRight = '2px solid rgba(100, 116, 139, 0.6)'
+          region.element.style.boxSizing = 'border-box'
 
-            // Only show context menu before analysis
-            if (!project) {
-              setContextMenu({
-                x: e.clientX,
-                y: e.clientY,
-                segmentIndex: index,
-              })
-            }
+          // Create and add select button programmatically
+          const button = document.createElement('button')
+          button.className = 'region-select-btn'
+          button.textContent = selected ? '✓' : 'Select'
+          button.style.cssText = `
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 500;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            z-index: 10;
+            background-color: ${selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(148, 163, 184, 0.7)'};
+            color: white;
+            transition: background-color 0.2s;
+          `
+
+          // Add hover effects
+          button.addEventListener('mouseenter', () => {
+            button.style.opacity = '0.8'
+          })
+          button.addEventListener('mouseleave', () => {
+            button.style.opacity = '1'
+          })
+
+          // Add click handler for select button
+          button.addEventListener('click', (e) => {
+            e.stopPropagation() // Prevent region click
+            toggleSegmentSelection(start, end)
+          })
+
+          // Append button to region element
+          region.element.appendChild(button)
+
+          // Click handler
+          region.on('click', (e) => {
+            // Check if it's a right-click
+            if (e.button === 2) {
+              e.preventDefault()
+              e.stopPropagation()
+
+              // Only show context menu before analysis
+              if (!project) {
+                setContextMenu({
+                  x: e.clientX,
+                  y: e.clientY,
+                  segmentIndex: actualIndex,
+                })
+              }
           } else {
             // Left click - normal behavior
             handleSegmentClick(start, end)
           }
         })
 
-        // Prevent default context menu on region
+        // Right-click to show context menu (split/delete)
         if (!project && region.element) {
           region.element.addEventListener('contextmenu', (e) => {
             e.preventDefault()
+
+            // Calculate the time position where the click occurred
+            const ws = wavesurferRef.current
+            if (!ws) return
+
+            const rect = waveformRef.current?.getBoundingClientRect()
+            if (!rect) return
+
+            const clickX = e.clientX - rect.left
+            const duration = ws.getDuration()
+            const clickTime = (clickX / rect.width) * duration
+
+            // Show context menu with split/delete options
+            setContextMenu({
+              segmentIndex: actualIndex,
+              x: e.clientX,
+              y: e.clientY,
+              splitTime: clickTime
+            })
           })
         }
 
@@ -518,7 +550,7 @@ export function WaveformViewer() {
           region.on('update-end', () => {
             const newStart = region.start
             const newEnd = region.end
-            updateSegment(index, newStart, newEnd)
+            updateSegment(actualIndex, newStart, newEnd)
             // Clear dragging timecodes and reset state
             setDraggingTimecodes(null)
             dragStartRef.current = null
@@ -526,9 +558,64 @@ export function WaveformViewer() {
             isFirstUpdate = true
           })
         }
-      }
+        }
+      }, index * 10) // Stagger region creation by 10ms each to prevent UI freeze
     })
+
+    // After all programmatic regions are added, enable drag-to-create for user
+    // Only enable if before analysis (project is null) and detection has run
+    if (!project && segments.length > 0) {
+      setTimeout(() => {
+        if (!regionsRef.current) return
+
+        // Remove old region-created listener if it exists
+        if (regionCreatedHandlerRef.current) {
+          regionsRef.current.un('region-created', regionCreatedHandlerRef.current)
+        }
+
+        // Enable drag selection for creating new regions
+        regionsRef.current.enableDragSelection({
+          color: 'rgba(148, 163, 184, 0.2)',
+        })
+
+        // Listen for user-created regions (drag-to-create)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const handleRegionCreated = (region: any) => {
+          // Only add if it's a new region (not already in segments)
+          const exists = segments.some(([s, e]) =>
+            Math.abs(s - region.start) < 0.1 && Math.abs(e - region.end) < 0.1
+          )
+          if (!exists) {
+            setTimeout(() => {
+              addSegment(region.start, region.end)
+            }, 0)
+          }
+        }
+
+        // Store reference and add listener
+        regionCreatedHandlerRef.current = handleRegionCreated
+        regionsRef.current.on('region-created', handleRegionCreated)
+      }, (segmentsToRender.length + 1) * 10) // Wait for all regions to be added
+    }
   }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, zoom, addSegment, isSegmentSelected, findCueForSegment, handleSegmentClick])
+
+  // Track mouse position during dragging
+  useEffect(() => {
+    if (!draggingTimecodes) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (draggingTimecodes) {
+        setDraggingTimecodes(prev => prev ? {
+          ...prev,
+          mouseX: e.clientX,
+          mouseY: e.clientY
+        } : null)
+      }
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    return () => window.removeEventListener('mousemove', handleMouseMove)
+  }, [draggingTimecodes])
 
   const handlePlayPause = () => {
     if (wavesurferRef.current) {
@@ -542,17 +629,14 @@ export function WaveformViewer() {
     const ws = wavesurferRef.current
     const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
-
-    // Calculate the time position at the center of current view
-    const scrollLeft = wrapper.scrollLeft
     const viewportWidth = wrapper.clientWidth
-    const scrollWidth = wrapper.scrollWidth
+    const currentScrollLeft = wrapper.scrollLeft
 
-    // Center of viewport in pixels
-    const centerPx = scrollLeft + (viewportWidth / 2)
-
-    // Center time position
-    const centerTime = (centerPx / scrollWidth) * duration
+    // Calculate the center point of the current viewport in time
+    // This works whether audio is playing or not
+    const currentWidth = zoom === 0 ? viewportWidth : duration * zoom
+    const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
+    const centerTime = (viewportCenterPx / currentWidth) * duration
 
     // Calculate effective zoom level (pixels per second) when in fit mode
     const effectiveZoom = zoom === 0 ? viewportWidth / duration : zoom
@@ -570,26 +654,73 @@ export function WaveformViewer() {
 
     // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
     zoomRef.current = newZoom
+    console.log('DEBUG ZOOM IN - BEFORE ws.zoom(), wrapper dimensions:', {
+      scrollWidth: wrapper.scrollWidth,
+      clientWidth: wrapper.clientWidth,
+      scrollLeft: wrapper.scrollLeft
+    })
     ws.zoom(newZoom)
+    console.log('DEBUG ZOOM IN - AFTER ws.zoom(), wrapper dimensions:', {
+      scrollWidth: wrapper.scrollWidth,
+      clientWidth: wrapper.clientWidth,
+      scrollLeft: wrapper.scrollLeft
+    })
     setZoom(newZoom)
+
+    // Calculate scroll position immediately (before ws.zoom triggers redraw)
+    // Calculate expected width from zoom level
+    const expectedWidth = newZoom === 0 ? wrapper.clientWidth : duration * newZoom
+
+    // Calculate where the center point is in pixels at the new zoom level
+    const centerPx = (centerTime / duration) * expectedWidth
+
+    // Calculate target scroll position (keep center centered)
+    let targetScrollLeft = centerPx - (viewportWidth / 2)
+
+    // Smart positioning: avoid showing too much empty space at edges
+    const maxScrollLeft = expectedWidth - viewportWidth
+
+    console.log('DEBUG ZOOM IN - scroll calc:', {
+      expectedWidth,
+      centerPx,
+      viewportWidth,
+      targetScrollLeft,
+      maxScrollLeft
+    })
+
+    // If playhead near start, don't scroll past beginning
+    if (targetScrollLeft < 0) {
+      targetScrollLeft = 0
+    }
+    // If playhead near end, don't show empty space beyond waveform
+    else if (targetScrollLeft > maxScrollLeft) {
+      targetScrollLeft = Math.max(0, maxScrollLeft)
+    }
+
+    console.log('DEBUG ZOOM IN - storing pending scroll:', targetScrollLeft)
+    // Store the target scroll position to be applied after redraw
+    pendingScrollRef.current = targetScrollLeft
 
     // Update width and ticks immediately (calculation-based, no DOM read needed)
     updateWidthAndTicks()
 
-    // After zoom, recalculate scroll position to keep center time centered
-    // Use requestAnimationFrame to ensure DOM has updated for scroll calculation
+    // Apply scroll after multiple animation frames to ensure DOM is fully updated
+    // First frame: zoom is applied
     requestAnimationFrame(() => {
-      const newWrapper = ws.getWrapper()
-      // Calculate expected width from zoom level
-      const expectedWidth = newZoom === 0 ? newWrapper.clientWidth : duration * newZoom
-      const newScrollWidth = newZoom === 0 ? newWrapper.clientWidth : expectedWidth
-
-      // Calculate where the center time is now in pixels
-      const newCenterPx = (centerTime / duration) * newScrollWidth
-
-      // Scroll to keep it centered
-      const newScrollLeft = newCenterPx - (viewportWidth / 2)
-      newWrapper.scrollLeft = Math.max(0, newScrollLeft)
+      // Second frame: redraw has happened
+      requestAnimationFrame(() => {
+        // Third frame: all layout calculations complete
+        requestAnimationFrame(() => {
+          if (pendingScrollRef.current !== null) {
+            const newWrapper = ws.getWrapper()
+            console.log('DEBUG ZOOM IN - applying scroll after RAF:', pendingScrollRef.current)
+            console.log('DEBUG ZOOM IN - wrapper scrollWidth:', newWrapper.scrollWidth, 'clientWidth:', newWrapper.clientWidth)
+            newWrapper.scrollLeft = pendingScrollRef.current
+            console.log('DEBUG ZOOM IN - after setting, scrollLeft is now:', newWrapper.scrollLeft)
+            pendingScrollRef.current = null
+          }
+        })
+      })
     })
   }
 
@@ -599,17 +730,14 @@ export function WaveformViewer() {
     const ws = wavesurferRef.current
     const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
-
-    // Calculate the time position at the center of current view
-    const scrollLeft = wrapper.scrollLeft
     const viewportWidth = wrapper.clientWidth
-    const scrollWidth = wrapper.scrollWidth
+    const currentScrollLeft = wrapper.scrollLeft
 
-    // Center of viewport in pixels
-    const centerPx = scrollLeft + (viewportWidth / 2)
-
-    // Center time position
-    const centerTime = (centerPx / scrollWidth) * duration
+    // Calculate the center point of the current viewport in time
+    // This works whether audio is playing or not
+    const currentWidth = zoom === 0 ? viewportWidth : duration * zoom
+    const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
+    const centerTime = (viewportCenterPx / currentWidth) * duration
 
     // Calculate effective zoom level (pixels per second)
     const effectiveZoom = zoom === 0 ? viewportWidth / duration : zoom
@@ -636,35 +764,72 @@ export function WaveformViewer() {
     ws.zoom(newZoom)
     setZoom(newZoom)
 
+    // Calculate scroll position immediately (before ws.zoom triggers redraw)
+    // Calculate expected width from zoom level
+    const expectedWidth = newZoom === 0 ? wrapper.clientWidth : duration * newZoom
+
+    // Calculate where the center point is in pixels at the new zoom level
+    const centerPx = (centerTime / duration) * expectedWidth
+
+    // Calculate target scroll position (keep center centered)
+    let targetScrollLeft = centerPx - (viewportWidth / 2)
+
+    // Smart positioning: avoid showing too much empty space at edges
+    const maxScrollLeft = expectedWidth - viewportWidth
+
+    console.log('DEBUG ZOOM OUT - scroll calc:', {
+      expectedWidth,
+      centerPx,
+      viewportWidth,
+      targetScrollLeft,
+      maxScrollLeft
+    })
+
+    // If center near start, don't scroll past beginning
+    if (targetScrollLeft < 0) {
+      targetScrollLeft = 0
+    }
+    // If center near end, don't show empty space beyond waveform
+    else if (targetScrollLeft > maxScrollLeft) {
+      targetScrollLeft = Math.max(0, maxScrollLeft)
+    }
+
+    console.log('DEBUG ZOOM OUT - storing pending scroll:', targetScrollLeft)
+    // Store the target scroll position to be applied after redraw
+    pendingScrollRef.current = targetScrollLeft
+
     // Update width and ticks immediately (calculation-based, no DOM read needed)
     updateWidthAndTicks()
 
-    // After zoom, recalculate scroll position to keep center time centered
-    // Use requestAnimationFrame to ensure DOM has updated for scroll calculation
+    // Apply scroll after multiple animation frames to ensure DOM is fully updated
+    // First frame: zoom is applied
     requestAnimationFrame(() => {
-      const newWrapper = ws.getWrapper()
-      // Calculate expected width from zoom level
-      const expectedWidth = newZoom === 0 ? newWrapper.clientWidth : duration * newZoom
-      const newScrollWidth = newZoom === 0 ? newWrapper.clientWidth : expectedWidth
-
-      // Calculate where the center time is now in pixels
-      const newCenterPx = (centerTime / duration) * newScrollWidth
-
-      // Scroll to keep it centered
-      const newScrollLeft = newCenterPx - (viewportWidth / 2)
-      newWrapper.scrollLeft = Math.max(0, newScrollLeft)
+      // Second frame: redraw has happened
+      requestAnimationFrame(() => {
+        // Third frame: all layout calculations complete
+        requestAnimationFrame(() => {
+          if (pendingScrollRef.current !== null) {
+            const newWrapper = ws.getWrapper()
+            console.log('DEBUG ZOOM OUT - applying scroll after RAF:', pendingScrollRef.current)
+            console.log('DEBUG ZOOM OUT - wrapper scrollWidth:', newWrapper.scrollWidth, 'clientWidth:', newWrapper.clientWidth)
+            newWrapper.scrollLeft = pendingScrollRef.current
+            console.log('DEBUG ZOOM OUT - after setting, scrollLeft is now:', newWrapper.scrollLeft)
+            pendingScrollRef.current = null
+          }
+        })
+      })
     })
   }
 
   const handleZoomReset = () => {
     console.log('Zoom Reset - current:', zoom, 'resetting to 0')
 
-    if (!wavesurferRef.current) return
-
     // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
     zoomRef.current = 0
     setZoom(0)
-    wavesurferRef.current.zoom(0)
+    if (wavesurferRef.current) {
+      wavesurferRef.current.zoom(0)
+    }
 
     // Update width and ticks immediately (for zoom=0, reads from DOM which is stable)
     updateWidthAndTicks()
@@ -678,37 +843,6 @@ export function WaveformViewer() {
     <Card className="w-full border-white/10 shadow-none">
       <CardContent className="pt-6">
         <div className="space-y-4">
-          {/* Select buttons row - above waveform, only show before analysis */}
-          {!project && isReady && segments.length > 0 && (
-            <div className="relative h-6 w-full">
-              {segments.map(([start, end], index) => {
-                const duration = wavesurferRef.current?.getDuration() || 1
-                const leftPercent = (start / duration) * 100
-                const widthPercent = ((end - start) / duration) * 100
-                const selected = isSegmentSelected(start, end)
-
-                return (
-                  <button
-                    key={index}
-                    onClick={() => toggleSegmentSelection(start, end)}
-                    className="absolute text-xs px-2 py-0.5 rounded transition-colors font-medium flex items-center justify-center"
-                    style={{
-                      left: `${leftPercent}%`,
-                      width: `${widthPercent}%`,
-                      minWidth: '60px',
-                      backgroundColor: selected ? '#22c55e' : '#94a3b8',
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {selected ? '✓' : 'Select'}
-                  </button>
-                )
-              })}
-            </div>
-          )}
-
           <div className="overflow-x-auto rounded-lg bg-[rgba(30,20,15,0.6)]">
             {/* Wrapper that contains both ruler and waveform - scrolls as one unit */}
             <div
@@ -721,8 +855,19 @@ export function WaveformViewer() {
               {/* Timecode Ruler - flows naturally in document, scrolls with waveform */}
               {isReady && (() => {
                 // Always prefer waveformWidth from state (updated by handleRedraw) for consistency
-                // Fallback to fallbackWidth state (calculated in useLayoutEffect) to avoid DOM reads during render
-                const displayWidth = waveformWidth || fallbackWidth
+                // Fallback to direct DOM measurement if state not yet updated
+                let displayWidth = waveformWidth
+                if (!displayWidth || displayWidth === 0) {
+                  const wrapper = wavesurferRef.current?.getWrapper()
+                  if (zoom === 0) {
+                    // In fit mode, use container width
+                    const container = waveformRef.current?.parentElement
+                    displayWidth = container?.clientWidth || wrapper?.clientWidth || 0
+                  } else {
+                    // In zoom mode, use scroll width
+                    displayWidth = wrapper?.scrollWidth || wrapper?.clientWidth || 0
+                  }
+                }
 
                 const duration = wavesurferRef.current?.getDuration() || 1
 
@@ -737,10 +882,6 @@ export function WaveformViewer() {
                   >
                     {ticks.map((tick, index) => {
                       const leftPx = (tick.position / duration) * displayWidth
-
-                      if (index === 0) {
-                        console.log('Ruler render - width:', displayWidth, 'zoom:', zoom, 'ticks:', ticks.length)
-                      }
 
                       return (
                         <div
@@ -771,50 +912,21 @@ export function WaveformViewer() {
 
               <div ref={waveformRef} className="w-full" />
 
-              {/* Dragging timecode tooltips - positioned above handles */}
-              {draggingTimecodes && (
-                <>
-                  {draggingTimecodes.activeHandle === 'both' ? (
-                    /* Combined tooltip when dragging whole region */
-                    <div
-                      className="absolute top-2 bg-primary text-primary-foreground px-3 py-2 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
-                      style={{
-                        left: `${(draggingTimecodes.startPos + draggingTimecodes.endPos) / 2}px`,
-                        transform: 'translateX(-50%)',
-                        zIndex: 52
-                      }}
-                    >
-                      <div>Start: {draggingTimecodes.start}</div>
-                      <div>End: {draggingTimecodes.end}</div>
-                    </div>
-                  ) : (
-                    /* Separate tooltips when dragging individual handles */
-                    <>
-                      {/* Start handle tooltip */}
-                      <div
-                        className="absolute top-2 bg-primary text-primary-foreground px-2 py-1 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
-                        style={{
-                          left: `${draggingTimecodes.startPos}px`,
-                          transform: 'translateX(-50%)',
-                          zIndex: draggingTimecodes.activeHandle === 'start' ? 52 : 50
-                        }}
-                      >
-                        {draggingTimecodes.start}
-                      </div>
-                      {/* End handle tooltip */}
-                      <div
-                        className="absolute top-2 bg-primary text-primary-foreground px-2 py-1 rounded shadow-lg pointer-events-none text-xs font-mono whitespace-nowrap"
-                        style={{
-                          left: `${draggingTimecodes.endPos}px`,
-                          transform: 'translateX(-50%)',
-                          zIndex: draggingTimecodes.activeHandle === 'end' ? 52 : 50
-                        }}
-                      >
-                        {draggingTimecodes.end}
-                      </div>
-                    </>
-                  )}
-                </>
+              {/* Dragging timecode tooltips - bottom-right corner near mouse cursor */}
+              {draggingTimecodes && draggingTimecodes.mouseX !== undefined && draggingTimecodes.mouseY !== undefined && (
+                <div
+                  className="fixed bg-primary text-primary-foreground rounded-lg shadow-xl px-3 py-2 pointer-events-none text-sm font-mono whitespace-nowrap"
+                  style={{
+                    left: `${draggingTimecodes.mouseX}px`,
+                    top: `${draggingTimecodes.mouseY}px`,
+                    transform: 'translate(calc(-100% - 12px), calc(-100% - 12px))',
+                    zIndex: 9999
+                  }}
+                >
+                  {draggingTimecodes.activeHandle === 'start' && draggingTimecodes.start}
+                  {draggingTimecodes.activeHandle === 'end' && draggingTimecodes.end}
+                  {draggingTimecodes.activeHandle === 'both' && `${draggingTimecodes.start} - ${draggingTimecodes.end}`}
+                </div>
               )}
             </div>
           </div>
@@ -883,29 +995,79 @@ export function WaveformViewer() {
 
           {/* Context Menu */}
           {contextMenu && (
-            <div
-              className="fixed bg-white border border-gray-300 rounded-md shadow-lg py-1 z-50"
-              style={{
-                left: `${contextMenu.x}px`,
-                top: `${contextMenu.y}px`,
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
-                onClick={() => handleSplitAtPlayhead(contextMenu.segmentIndex)}
+            <>
+              {/* Backdrop to close on click */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setContextMenu(null)}
+              />
+
+              <div
+                className="fixed bg-white border border-gray-300 rounded-md shadow-lg py-1 z-50"
+                style={{
+                  left: `${contextMenu.x}px`,
+                  top: `${contextMenu.y}px`,
+                }}
+                onClick={(e) => e.stopPropagation()}
               >
-                <span>✂️</span>
-                <span>Split at Playhead</span>
-              </button>
-              <button
-                className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 text-red-600"
-                onClick={() => handleDeleteCue(contextMenu.segmentIndex)}
+                <button
+                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+                  onClick={() => handleSplitAtMouse(contextMenu.segmentIndex, contextMenu.splitTime)}
+                >
+                  <span>✂️</span>
+                  <span>Split cue</span>
+                </button>
+                <button
+                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 text-red-600"
+                  onClick={() => handleDeleteCue(contextMenu.segmentIndex, contextMenu.x, contextMenu.y)}
+                >
+                  <span>🗑️</span>
+                  <span>Delete cue</span>
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* Delete Confirmation Tooltip */}
+          {deleteConfirm && (
+            <>
+              {/* Backdrop to close on click */}
+              <div
+                className="fixed inset-0 z-40"
+                onClick={() => setDeleteConfirm(null)}
+              />
+
+              {/* Tooltip */}
+              <div
+                className="fixed bg-white border border-gray-300 rounded-lg shadow-xl p-4 z-50"
+                style={{
+                  left: `${deleteConfirm.x}px`,
+                  top: `${deleteConfirm.y}px`,
+                  transform: 'translate(-50%, -100%)',
+                  marginTop: '-8px'
+                }}
+                onClick={(e) => e.stopPropagation()}
               >
-                <span>🗑️</span>
-                <span>Delete Cue</span>
-              </button>
-            </div>
+                <p className="text-sm mb-3">Delete this cue?</p>
+                <div className="flex gap-2">
+                  <button
+                    className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded"
+                    onClick={() => setDeleteConfirm(null)}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    className="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded"
+                    onClick={() => {
+                      deleteSegment(deleteConfirm.index)
+                      setDeleteConfirm(null)
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </CardContent>
