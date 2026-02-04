@@ -21,7 +21,28 @@ function App() {
         {/* Header */}
         <header className="relative">
           <div className="flex items-center justify-between">
-            <div className="flex-1" />
+            <div className="flex-1 flex justify-start">
+              {currentPage === 'cuesynch' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage('analysis')}
+                  className="glass-lighter hover:bg-primary/20 border-primary/20 transition-all duration-300"
+                >
+                  ← Back
+                </Button>
+              )}
+              {currentPage === 'analysis' && project && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={resetToSegmentation}
+                  className="glass-lighter hover:bg-primary/20 border-primary/20 transition-all duration-300"
+                >
+                  ← Back
+                </Button>
+              )}
+            </div>
             <div className="text-center group">
               <h1 className="text-[78px] font-semibold tracking-tight font-display -mb-2 bg-gradient-to-b from-white to-foreground/40 bg-clip-text text-transparent group-hover:from-primary group-hover:to-primary/40 transition-all duration-500 cursor-default">
                 Motive
@@ -79,23 +100,13 @@ function App() {
                             {project.cues.length} cues analyzed - Click cues above or cards below to navigate
                           </p>
                         </div>
-                        <div className="flex items-center gap-4">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={resetToSegmentation}
-                            className="glass-lighter"
-                          >
-                            Back
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => setCurrentPage('cuesynch')}
-                            className="btn-primary px-6"
-                          >
-                            Export to DAW or NLE
-                          </Button>
-                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => setCurrentPage('cuesynch')}
+                          className="btn-primary px-6"
+                        >
+                          Export to DAW or NLE
+                        </Button>
                       </div>
 
                       {/* Cue Cards */}

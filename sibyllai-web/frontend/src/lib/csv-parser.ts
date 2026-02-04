@@ -165,6 +165,26 @@ export function detectFrameRate(rows: CSVRow[], timeColumn: string): number {
 }
 
 /**
+ * Title case a string (capitalize first letter of each word)
+ */
+function toTitleCase(str: string): string {
+  return str.replace(/\b\w/g, char => char.toUpperCase());
+}
+
+/**
+ * Add label prefix for specific fields with brackets
+ */
+function addFieldLabel(field: string, value: string): string {
+  const fieldLower = field.toLowerCase();
+  const capitalizedValue = toTitleCase(value);
+  if (fieldLower === 'bpm') return `[BPM ${value}]`; // Keep BPM value as-is (it's a number)
+  if (fieldLower === 'instruments') return `[Inst: ${capitalizedValue}]`;
+  if (fieldLower === 'genres') return `[Genre: ${capitalizedValue}]`;
+  if (fieldLower === 'style') return `[Style: ${capitalizedValue}]`;
+  return capitalizedValue;
+}
+
+/**
  * Parse CSV with selected fields for marker names
  */
 export function parseCSVWithSelectedFields(
@@ -182,10 +202,14 @@ export function parseCSVWithSelectedFields(
     const time = parseTime(timeStr, frameRate);
     if (time === null) continue;
 
-    // Build marker name from selected fields
+    // Build marker name from selected fields with labels
     const nameParts = selectedFields
-      .map(field => row[field])
-      .filter(value => value && value.trim()); // Filter out empty values
+      .map(field => {
+        const value = row[field];
+        if (!value || !value.trim()) return null;
+        return addFieldLabel(field, value.trim());
+      })
+      .filter((value): value is string => value !== null);
 
     const name = nameParts.length > 0 ? nameParts.join(' - ') : 'Marker';
 

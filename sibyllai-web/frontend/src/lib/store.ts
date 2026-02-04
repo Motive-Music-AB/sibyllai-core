@@ -101,7 +101,7 @@ export const useAppStore = create<AppState>((set) => ({
     set({ framerate: fps }),
 
   setSegments: (segments, duration) =>
-    set({ segments, duration }),
+    set({ segments, duration, selectedSegments: segments }),
 
   setSelectedSegments: (selectedSegments) =>
     set({ selectedSegments }),

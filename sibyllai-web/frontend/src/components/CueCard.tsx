@@ -141,10 +141,13 @@ export function CueCard({ cue, index }: CueCardProps) {
     STYLE_THRESHOLD
   )
 
-  // Limit items for display
-  const displayInstruments = localCurated.instruments?.slice(0, 6) || []
-  const displayGenres = localCurated.genres?.slice(0, 2) || localCurated.genre?.slice(0, 2) || []
-  const displayStyles = localCurated.style?.slice(0, 2) || []
+  // Title case helper
+  const toTitleCase = (str: string) => str.replace(/\b\w/g, char => char.toUpperCase())
+
+  // Limit items for display (with title case)
+  const displayInstruments = (localCurated.instruments?.slice(0, 6) || []).map(toTitleCase)
+  const displayGenres = (localCurated.genres?.slice(0, 2) || localCurated.genre?.slice(0, 2) || []).map(toTitleCase)
+  const displayStyles = (localCurated.style?.slice(0, 2) || []).map(toTitleCase)
 
   return (
     <Card

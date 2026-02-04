@@ -55,13 +55,14 @@ export function WaveformViewer() {
     // Create WaveSurfer instance
     const ws = WaveSurfer.create({
       container: waveformRef.current,
-      waveColor: 'rgb(200, 210, 220)',
-      progressColor: 'rgb(59, 130, 246)',
-      cursorColor: 'rgb(239, 68, 68)',
+      waveColor: 'rgba(200, 130, 80, 0.6)',
+      progressColor: 'rgb(232, 148, 58)',
+      cursorColor: 'rgb(232, 148, 58)',
       barWidth: 2,
       barGap: 1,
       height: 180,
       normalize: true,
+      backend: 'WebAudio',
     })
 
     // Create regions plugin with drag-to-create enabled
@@ -843,10 +844,10 @@ export function WaveformViewer() {
   }
 
   return (
-    <Card className="w-full">
+    <Card className="w-full border-white/10 shadow-none">
       <CardContent className="pt-6">
         <div className="space-y-4">
-          <div className="overflow-x-auto border rounded-lg">
+          <div className="overflow-x-auto rounded-lg bg-[rgba(30,20,15,0.6)]">
             {/* Wrapper that contains both ruler and waveform - scrolls as one unit */}
             <div
               style={{
@@ -877,7 +878,7 @@ export function WaveformViewer() {
                 return (
                   <div
                     ref={rulerRef}
-                    className="relative h-8 bg-gray-50 border-b"
+                    className="relative h-8 bg-[rgba(40,28,22,0.8)] border-b border-white/10"
                     style={{
                       width: zoom === 0 ? '100%' : `${displayWidth}px`,
                       minWidth: zoom === 0 ? '100%' : `${displayWidth}px`,
@@ -894,7 +895,7 @@ export function WaveformViewer() {
                         >
                           {/* Tick mark */}
                           <div
-                            className="bg-gray-400"
+                            className="bg-foreground/40"
                             style={{
                               width: '1px',
                               height: tick.isMajor ? '12px' : '6px',
@@ -902,7 +903,7 @@ export function WaveformViewer() {
                           />
                           {/* Timecode label (only on major ticks) */}
                           {tick.isMajor && (
-                            <div className="absolute top-3 -translate-x-1/2 text-xs text-gray-600 whitespace-nowrap">
+                            <div className="absolute top-3 -translate-x-1/2 text-xs text-foreground/60 whitespace-nowrap">
                               {tick.timecode}
                             </div>
                           )}
@@ -918,7 +919,7 @@ export function WaveformViewer() {
               {/* Dragging timecode tooltips - bottom-right corner near mouse cursor */}
               {draggingTimecodes && draggingTimecodes.mouseX !== undefined && draggingTimecodes.mouseY !== undefined && (
                 <div
-                  className="fixed bg-white border border-gray-300 rounded-lg shadow-xl px-3 py-2 pointer-events-none text-sm font-mono whitespace-nowrap"
+                  className="fixed bg-primary border border-primary/50 rounded-lg shadow-xl px-3 py-2 pointer-events-none text-sm font-mono whitespace-nowrap text-primary-foreground"
                   style={{
                     left: `${draggingTimecodes.mouseX}px`,
                     top: `${draggingTimecodes.mouseY}px`,
@@ -938,7 +939,7 @@ export function WaveformViewer() {
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 {/* Playhead timecode display */}
-                <div className="px-3 py-1.5 bg-gray-100 border rounded text-sm font-mono text-gray-700 min-w-[120px] text-center">
+                <div className="px-3 py-1.5 bg-white/10 border border-white/10 rounded text-sm font-mono text-foreground min-w-[120px] text-center">
                   {currentTimecode || secondsToTimecode(0, framerate, startTimecode)}
                 </div>
                 <Button

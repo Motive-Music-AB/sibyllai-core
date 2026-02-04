@@ -165,10 +165,24 @@ export function CueSynch() {
     )
   }
 
+  // Title case helper
+  const toTitleCase = (str: string) => str.replace(/\b\w/g, char => char.toUpperCase())
+
   const getPreview = () => {
     if (!cueData?.rows || cueData.rows.length === 0) return ''
     const row = cueData.rows[0]
-    const parts = selectedFields.map((field) => row[field]).filter(Boolean)
+    const parts = selectedFields.map((field) => {
+      const value = row[field]
+      if (!value) return null
+      // Add label prefixes with brackets for specific fields with capitalization
+      const fieldLower = field.toLowerCase()
+      const capitalizedValue = toTitleCase(value)
+      if (fieldLower === 'bpm') return `[BPM ${value}]` // Keep BPM value as-is (it's a number)
+      if (fieldLower === 'instruments') return `[Inst: ${capitalizedValue}]`
+      if (fieldLower === 'genres') return `[Genre: ${capitalizedValue}]`
+      if (fieldLower === 'style') return `[Style: ${capitalizedValue}]`
+      return capitalizedValue
+    }).filter(Boolean)
     return parts.join(' - ') || 'Marker'
   }
 
@@ -308,12 +322,12 @@ export function CueSynch() {
         <Button
           onClick={handleGenerateWAV}
           disabled={isGenerating || selectedFields.length === 0}
-          className="w-full"
+          className="w-full btn-primary h-14 text-lg rounded-xl shadow-lg"
           size="lg"
         >
           {isGenerating ? (
             <span className="flex items-center justify-center">
-              <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-2.5"></div>
+              <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-primary-foreground mr-2.5"></div>
               Generating WAV...
             </span>
           ) : (
