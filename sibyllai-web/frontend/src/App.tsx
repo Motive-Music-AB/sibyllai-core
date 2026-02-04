@@ -29,36 +29,11 @@ function App() {
               </p>
             </div>
             <div className="flex-1 flex justify-end">
-              {currentPage === 'analysis' && fileId && (
+              {currentPage === 'analysis' && fileId && !project && (
                 <Button variant="outline" size="sm" onClick={reset}>
                   New Import
                 </Button>
               )}
-            </div>
-          </div>
-          {/* Navigation Tabs */}
-          <div className="flex justify-center">
-            <div className="inline-flex bg-muted rounded-lg p-1 border">
-              <button
-                onClick={() => setCurrentPage('analysis')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  currentPage === 'analysis'
-                    ? 'bg-background shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                Analysis
-              </button>
-              <button
-                onClick={() => setCurrentPage('cuesynch')}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                  currentPage === 'cuesynch'
-                    ? 'bg-background shadow-sm'
-                    : 'text-muted-foreground hover:text-foreground'
-                }`}
-              >
-                CueSynch
-              </button>
             </div>
           </div>
         </header>
@@ -100,34 +75,18 @@ function App() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => exportProjectToCSV(project)}
-                    >
-                      Export CSV
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
                       onClick={resetToSegmentation}
                     >
-                      Edit Cues
+                      Back
                     </Button>
                     <Button
-                      variant="outline"
                       size="sm"
-                      onClick={() => setShowControls(!showControls)}
+                      onClick={() => setCurrentPage('cuesynch')}
                     >
-                      {showControls ? 'Hide' : 'Show'} Settings
+                      Export to DAW or NLE
                     </Button>
                   </div>
                 </div>
-
-                {/* Collapsible Controls */}
-                {showControls && (
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-4 border-b">
-                    <ThresholdControls />
-                    <AnalyzeButton />
-                  </div>
-                )}
 
                 {/* Cue Cards */}
                 <div className="grid gap-4">

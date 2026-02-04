@@ -3,7 +3,7 @@
  * Export analysis results to CSV for use with CueSynch
  */
 
-import type { SibylProject, Cue } from './types'
+import type { SibylProject } from './types'
 
 /**
  * Generate CSV content from project cues
@@ -12,9 +12,8 @@ export function generateCueCSV(project: SibylProject): string {
   const headers = [
     'Timecode',
     'Cue',
-    'Start',
-    'End',
-    'Duration',
+    'Start_TC',
+    'End_TC',
     'BPM',
     'Key',
     'Instruments',
@@ -23,7 +22,6 @@ export function generateCueCSV(project: SibylProject): string {
   ]
 
   const rows = project.cues.map((cue, index) => {
-    const duration = cue.end - cue.start
     const instruments = cue.musical_profile.curated.instruments.join(', ') || 'Unknown'
     const genres = cue.musical_profile.curated.genres.join(', ') || 'Unknown'
     const style = cue.musical_profile.curated.style.join(', ') || 'Unknown'
@@ -31,9 +29,8 @@ export function generateCueCSV(project: SibylProject): string {
     return [
       cue.start_tc,
       `Cue ${index + 1}`,
-      cue.start.toFixed(2),
-      cue.end.toFixed(2),
-      duration.toFixed(2),
+      cue.start_tc,
+      cue.end_tc,
       cue.musical_profile.bpm?.toFixed(1) || 'Unknown',
       cue.musical_profile.key || 'Unknown',
       `"${instruments}"`,

@@ -12,6 +12,7 @@ export function AnalyzeButton() {
     isAnalyzing,
     analysisProgress,
     analysisStatus,
+    framerate,
     setIsAnalyzing,
     setAnalysisProgress,
     setProject,
@@ -40,7 +41,7 @@ export function AnalyzeButton() {
       const response = await api.analyzeCues({
         file_id: fileId,
         segments: selectedSegments,
-        fps: 25,
+        fps: framerate,
         threshold: 0.5,
       })
 
@@ -89,7 +90,7 @@ export function AnalyzeButton() {
       setAnalysisProgress(0, 'Analysis failed')
       setIsAnalyzing(false)
     }
-  }, [fileId, selectedSegments, setIsAnalyzing, setAnalysisProgress, setProject, setShowControls])
+  }, [fileId, selectedSegments, framerate, setIsAnalyzing, setAnalysisProgress, setProject, setShowControls])
 
   if (!fileId) {
     return null

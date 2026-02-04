@@ -1,7 +1,5 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
-import { useAppStore } from '@/lib/store'
-import { generateCueCSV } from '@/lib/csv-export'
 import {
   parseCSVWithHeaders,
   parseCSVWithSelectedFields,
@@ -11,63 +9,23 @@ import {
 } from '@/lib/csv-parser'
 import { generateWavWithMarkers, downloadBlob } from '@/lib/wav-generator'
 
-interface CueData {
+interface CSVData {
   headers: string[]
   rows: CSVRow[]
   frameRate: number
   detectedTimeColumn: string
-  sourceName: string
 }
 
 export function CueSynch() {
-  const { project, fileName, framerate } = useAppStore()
-
   const [file, setFile] = useState<File | null>(null)
   const [frameRateSetting, setFrameRateSetting] = useState<string>('auto')
-  const [cueData, setCueData] = useState<CueData | null>(null)
+  const [csvData, setCSVData] = useState<CSVData | null>(null)
   const [timeColumn, setTimeColumn] = useState<string>('')
   const [selectedFields, setSelectedFields] = useState<string[]>([])
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string>('')
-  const [useAnalysisData, setUseAnalysisData] = useState(true)
   const fileInputRef = useRef<HTMLInputElement>(null)
-
-  const analysisFrameRate = project?.project?.fps ?? framerate ?? 24
-
-  const getDefaultSelectedFields = useCallback((headers: string[], timeField: string) => {
-    // Select all non-time fields by default
-    return headers.filter((header) => header !== timeField)
-  }, [])
-
-  // Convert project cues to CueData format
-  const convertProjectToCueData = useCallback(() => {
-    if (!project) return null
-
-    const csvContent = generateCueCSV(project)
-    const { headers, rows } = parseCSVWithHeaders(csvContent)
-    const detectedTime = detectTimeColumn(headers)
-
-    return {
-      headers,
-      rows,
-      frameRate: analysisFrameRate,
-      detectedTimeColumn: detectedTime,
-      sourceName: fileName || project.project.name || 'analysis',
-    }
-  }, [project, analysisFrameRate, fileName])
-
-  // Auto-load project data when available
-  useEffect(() => {
-    if (project && useAnalysisData) {
-      const data = convertProjectToCueData()
-      if (data) {
-        setCueData(data)
-        setTimeColumn(data.detectedTimeColumn)
-        setSelectedFields(getDefaultSelectedFields(data.headers, data.detectedTimeColumn))
-      }
-    }
-  }, [project, useAnalysisData, convertProjectToCueData, getDefaultSelectedFields])
 
   const analyzeCSV = useCallback(async (csvFile: File, frameSetting: string) => {
     setIsAnalyzing(true)
@@ -90,14 +48,14 @@ export function CueSynch() {
         frameRate = parseFloat(frameSetting)
       }
 
-      setCueData({
+      setCSVData({
         headers,
         rows,
         frameRate,
         detectedTimeColumn: detectedTime,
-        sourceName: csvFile.name,
       })
       setTimeColumn(detectedTime)
+      // Default to all non-time fields selected
       const nonTimeFields = headers.filter(h => h !== detectedTime)
       setSelectedFields(nonTimeFields)
     } catch (err) {
@@ -110,9 +68,8 @@ export function CueSynch() {
 
   const handleFileSelect = async (selectedFile: File) => {
     setFile(selectedFile)
-    setUseAnalysisData(false)
     setError('')
-    setCueData(null)
+    setCSVData(null)
     setTimeColumn('')
     setSelectedFields([])
     await analyzeCSV(selectedFile, frameRateSetting)
@@ -126,20 +83,8 @@ export function CueSynch() {
     }
   }
 
-  const handleUseAnalysisData = () => {
-    setUseAnalysisData(true)
-    setFile(null)
-    setError('')
-    const data = convertProjectToCueData()
-    if (data) {
-      setCueData(data)
-      setTimeColumn(data.detectedTimeColumn)
-      setSelectedFields(getDefaultSelectedFields(data.headers, data.detectedTimeColumn))
-    }
-  }
-
   const handleGenerateWAV = () => {
-    if (!cueData || !timeColumn || selectedFields.length === 0) {
+    if (!csvData || !timeColumn || selectedFields.length === 0) {
       setError('Please select time column and at least one marker field')
       return
     }
@@ -149,19 +94,20 @@ export function CueSynch() {
 
     try {
       const markers = parseCSVWithSelectedFields(
-        cueData.rows,
-        cueData.frameRate,
+        csvData.rows,
+        csvData.frameRate,
         timeColumn,
         selectedFields
       )
 
       if (markers.length === 0) {
-        throw new Error('No valid markers found')
+        throw new Error('No valid markers found in the CSV')
       }
 
       const blob = generateWavWithMarkers(markers)
-      const baseName = cueData.sourceName.replace(/\.(csv|wav|mp3|m4a)$/i, '')
-      const filename = `${baseName}_marker_list.wav`
+      const filename = file
+        ? file.name.replace('.csv', '_marker_list.wav')
+        : 'marker_list.wav'
       downloadBlob(blob, filename)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate WAV file')
@@ -178,76 +124,49 @@ export function CueSynch() {
   }
 
   const getPreview = () => {
-    if (!cueData?.rows || cueData.rows.length === 0) return ''
-    const row = cueData.rows[0]
+    if (!csvData?.rows || csvData.rows.length === 0) return ''
+    const row = csvData.rows[0]
     const parts = selectedFields.map((field) => row[field]).filter(Boolean)
     return parts.join(' - ') || 'Marker'
   }
 
   const getTimecodePreview = () => {
-    if (!cueData?.rows || cueData.rows.length === 0 || !timeColumn) return []
-    return cueData.rows.slice(0, 3).map((row) => row[timeColumn]).filter(Boolean)
+    if (!csvData?.rows || csvData.rows.length === 0 || !timeColumn) return []
+    return csvData.rows.slice(0, 3).map((row) => row[timeColumn]).filter(Boolean)
   }
-
-  const hasAnalysisData = !!project && project.cues.length > 0
 
   return (
     <div className="space-y-6">
-      {/* Data Source Info */}
-      {hasAnalysisData && cueData && (
-        <div className="bg-card rounded-lg p-4 border">
-          <p className="text-sm text-muted-foreground">
-            Using {project.cues.length} cues from: <strong>{fileName}</strong>
-          </p>
-          <p className="text-sm text-muted-foreground">
-            Frame rate: <strong>{analysisFrameRate} fps</strong>
-          </p>
-        </div>
-      )}
-
-      {/* File Upload - only show when no analysis data or explicitly choosing CSV */}
-      {(!hasAnalysisData || !useAnalysisData) && (
-        <div
-          onDrop={handleDrop}
-          onDragOver={(e) => e.preventDefault()}
-          onClick={() => fileInputRef.current?.click()}
-          className={`bg-card rounded-lg p-10 border-2 border-dashed transition-all cursor-pointer ${
-            file
-              ? 'border-green-500'
-              : 'border-muted-foreground/30 hover:border-primary'
-          }`}
+      {/* Frame Rate Selector */}
+      <div className="bg-card rounded-lg p-5 border">
+        <label className="block mb-1.5 font-semibold text-sm">Frame Rate</label>
+        <select
+          value={frameRateSetting}
+          onChange={(e) => setFrameRateSetting(e.target.value)}
+          className="w-full p-2.5 bg-muted border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
         >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])}
-            className="hidden"
-          />
-          <div className="text-center">
-            {file ? (
-              <>
-                <div className="text-3xl mb-3">&#10003;</div>
-                <p className="text-lg font-semibold text-green-500 mb-1.5">
-                  {file.name}
-                </p>
-                <p className="text-muted-foreground text-sm">
-                  Click to choose a different file
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="text-5xl mb-3">&#128193;</div>
-                <p className="text-lg font-semibold mb-1.5">Drop CSV file here</p>
-                <p className="text-muted-foreground text-sm">or click to browse</p>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+          <option value="auto">Auto Detect</option>
+          <option value="23.976">23.976 fps (Film)</option>
+          <option value="24">24 fps (Film)</option>
+          <option value="25">25 fps (PAL)</option>
+          <option value="29.97">29.97 fps (NTSC drop-frame)</option>
+          <option value="30">30 fps (NTSC)</option>
+          <option value="50">50 fps</option>
+          <option value="60">60 fps</option>
+        </select>
+      </div>
 
-      {/* Hidden file input for when using analysis data but want to switch */}
-      {hasAnalysisData && useAnalysisData && (
+      {/* File Upload */}
+      <div
+        onDrop={handleDrop}
+        onDragOver={(e) => e.preventDefault()}
+        onClick={() => fileInputRef.current?.click()}
+        className={`bg-card rounded-lg p-10 border-2 border-dashed transition-all cursor-pointer ${
+          file
+            ? 'border-green-500'
+            : 'border-muted-foreground/30 hover:border-primary'
+        }`}
+      >
         <input
           ref={fileInputRef}
           type="file"
@@ -255,7 +174,26 @@ export function CueSynch() {
           onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])}
           className="hidden"
         />
-      )}
+        <div className="text-center">
+          {file ? (
+            <>
+              <div className="text-3xl mb-3">&#10003;</div>
+              <p className="text-lg font-semibold text-green-500 mb-1.5">
+                {file.name}
+              </p>
+              <p className="text-muted-foreground text-sm">
+                Click to choose a different file
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="text-5xl mb-3">&#128193;</div>
+              <p className="text-lg font-semibold mb-1.5">Drop CSV file here</p>
+              <p className="text-muted-foreground text-sm">or click to browse</p>
+            </>
+          )}
+        </div>
+      </div>
 
       {/* Error Display */}
       {error && (
@@ -273,17 +211,55 @@ export function CueSynch() {
       )}
 
       {/* Field Selection */}
-      {cueData && cueData.headers && (
-        <div className="bg-card rounded-lg p-4 border">
-          <h2 className="font-medium mb-4">Configure Markers</h2>
+      {csvData && csvData.headers && (
+        <div className="bg-card rounded-lg p-5 border">
+          <h2 className="text-xl font-bold mb-5">Configure Markers</h2>
+
+          {/* Time Column Selection */}
+          <div className="mb-5">
+            <label className="block mb-1.5 font-semibold text-sm">
+              Time Column
+            </label>
+            <select
+              value={timeColumn}
+              onChange={(e) => setTimeColumn(e.target.value)}
+              className="w-full p-2.5 bg-muted border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              {csvData.headers.map((header) => (
+                <option key={header} value={header}>
+                  {header}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground mt-1.5">
+              Detected frame rate: {csvData.frameRate} fps
+            </p>
+            {getTimecodePreview().length > 0 && (
+              <div className="mt-2.5 bg-muted rounded-lg p-3">
+                <p className="text-xs text-muted-foreground mb-2.5">
+                  Sample timecodes:
+                </p>
+                <div className="flex flex-wrap gap-2.5">
+                  {getTimecodePreview().map((tc, idx) => (
+                    <div key={idx} className="font-mono text-primary text-sm">
+                      {tc}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Marker Fields Selection */}
-          <div className="mb-4">
-            <p className="text-sm text-muted-foreground mb-2">
+          <div className="mb-5">
+            <label className="block mb-1.5 font-semibold text-sm">
+              Marker Fields
+            </label>
+            <p className="text-xs text-muted-foreground mb-2.5">
               Select columns to include in marker names
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {cueData.headers
+              {csvData.headers
                 .filter((h) => h !== timeColumn)
                 .map((header) => (
                   <label
@@ -308,20 +284,20 @@ export function CueSynch() {
 
           {/* Preview */}
           {selectedFields.length > 0 &&
-            cueData.rows &&
-            cueData.rows.length > 0 && (
+            csvData.rows &&
+            csvData.rows.length > 0 && (
               <div className="bg-muted rounded-lg p-3">
-                <p className="text-sm text-muted-foreground mb-1">
+                <p className="text-xs text-muted-foreground mb-1.5">
                   Preview (first marker):
                 </p>
-                <p className="font-mono text-sm">{getPreview()}</p>
+                <p className="font-mono text-primary text-sm">{getPreview()}</p>
               </div>
             )}
         </div>
       )}
 
       {/* Generate Button */}
-      {cueData && (
+      {csvData && (
         <Button
           onClick={handleGenerateWAV}
           disabled={isGenerating || selectedFields.length === 0}
@@ -340,40 +316,42 @@ export function CueSynch() {
       )}
 
       {/* Instructions */}
-      {cueData && (
-        <div className="bg-card rounded-lg p-4 border">
-          <h3 className="font-medium mb-3">Next Steps</h3>
-          <ol className="space-y-2 text-sm text-muted-foreground">
+      {csvData && (
+        <div className="bg-card rounded-lg p-5 border">
+          <h3 className="text-lg font-bold mb-3">Next Steps</h3>
+          <ol className="space-y-2.5 text-muted-foreground text-sm">
             <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">1.</span>
+              <span className="font-bold text-primary mr-2.5">1.</span>
               <span>Download the generated WAV file</span>
             </li>
             <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">2.</span>
+              <span className="font-bold text-primary mr-2.5">2.</span>
               <span>Open Logic Pro with your project</span>
             </li>
             <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">3.</span>
+              <span className="font-bold text-primary mr-2.5">3.</span>
               <span>
                 Import the audio file to the correct position (e.g.{' '}
                 <strong>01:00:00:00</strong> or <strong>00:00:00:00</strong>)
               </span>
             </li>
             <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">4.</span>
+              <span className="font-bold text-primary mr-2.5">4.</span>
               <span>
                 Go to{' '}
                 <strong>Navigate &gt; Other &gt; Import Marker from Audio File</strong>
               </span>
             </li>
             <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">5.</span>
+              <span className="font-bold text-primary mr-2.5">5.</span>
               <span>Markers will appear at their correct timestamps!</span>
             </li>
           </ol>
-          <div className="mt-3 bg-muted/50 rounded-lg p-3">
-            <p className="text-sm text-muted-foreground">
-              <strong>Note:</strong> Also works with other DAWs that support WAV marker metadata (e.g. Adobe Audition).
+          <div className="mt-4 bg-muted/50 rounded-lg p-3 border">
+            <p className="text-xs text-muted-foreground">
+              <strong>Note:</strong> This tool also works with other DAWs that
+              support WAV marker metadata, including{' '}
+              <strong>Adobe Audition</strong>.
             </p>
           </div>
         </div>
