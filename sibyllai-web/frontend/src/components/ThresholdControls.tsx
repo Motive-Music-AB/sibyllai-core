@@ -98,6 +98,31 @@ export function ThresholdControls() {
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <label className="text-sm font-bold tracking-tight text-foreground">
+                    Silence Threshold
+                  </label>
+                  <p className="text-[10px] text-foreground-subtle font-medium uppercase tracking-wider">
+                    Amplitude level to trim silence
+                  </p>
+                </div>
+                <span className="glass-lighter px-3 py-1 rounded-lg font-mono font-bold text-xs text-primary border border-primary/20">
+                  {localSilenceThreshold < 0.001 ? localSilenceThreshold.toFixed(4) : localSilenceThreshold.toFixed(3)}
+                </span>
+              </div>
+              <Slider
+                value={[localSilenceThreshold]}
+                onValueChange={([value]) => setLocalSilenceThreshold(value)}
+                min={0.001}
+                max={0.1}
+                step={0.001}
+                disabled={isSegmenting}
+                className="py-2"
+              />
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-bold tracking-tight text-foreground">
                     In/Out Sensitivity
                   </label>
                   <p className="text-[10px] text-foreground-subtle font-medium uppercase tracking-wider">
@@ -164,31 +189,6 @@ export function ThresholdControls() {
                 min={0.5}
                 max={15.0}
                 step={0.1}
-                disabled={isSegmenting}
-                className="py-2"
-              />
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <label className="text-sm font-bold tracking-tight text-foreground">
-                    Silence Threshold
-                  </label>
-                  <p className="text-[10px] text-foreground-subtle font-medium uppercase tracking-wider">
-                    Amplitude level to trim silence
-                  </p>
-                </div>
-                <span className="glass-lighter px-3 py-1 rounded-lg font-mono font-bold text-xs text-primary border border-primary/20">
-                  {localSilenceThreshold < 0.001 ? localSilenceThreshold.toFixed(4) : localSilenceThreshold.toFixed(3)}
-                </span>
-              </div>
-              <Slider
-                value={[localSilenceThreshold]}
-                onValueChange={([value]) => setLocalSilenceThreshold(value)}
-                min={0.001}
-                max={0.1}
-                step={0.001}
                 disabled={isSegmenting}
                 className="py-2"
               />
