@@ -224,6 +224,42 @@ The pipeline is designed to be resilient:
 - Some detectors may fail silently on edge cases
 - Music2Emo analysis is the most fragile detector (run last in pipeline)
 
+## Critical: WaveformViewer Zoom Implementation
+
+**⚠️ DO NOT SIMPLIFY THE ZOOM LOGIC - IT TOOK WEEKS TO DEBUG ⚠️**
+
+WaveSurfer.js zoom works in **pixels-per-second**, NOT percentage:
+- `ws.zoom(0)` = "fit to container" (auto-calculated px/sec)
+- `ws.zoom(N)` = N pixels per second
+
+**The Bug That Kept Breaking Zoom:**
+
+When at zoom=0 (fit mode), the effective px/sec depends on audio duration and container width:
+- 20 second clip in 1000px container = **50 px/sec effective**
+- If you naively jump to `zoom=10`, you're actually **ZOOMING OUT** (10 < 50)!
+
+**The Fix (in `WaveformViewer.tsx`):**
+
+Always calculate `effectiveZoom = viewportWidth / duration` when at zoom=0, then find a zoom level that's actually greater (for zoom in) or less (for zoom out) than that value.
+
+```typescript
+// Calculate effective zoom level (pixels per second) when in fit mode
+const effectiveZoom = zoom === 0 ? viewportWidth / duration : zoom
+
+// Find the next zoom level that's actually higher than current effective zoom
+for (const level of ZOOM_LEVELS) {
+  if (level > effectiveZoom) {
+    newZoom = level
+    break
+  }
+}
+```
+
+**Never:**
+- Remove the effectiveZoom calculation
+- Assume zoom=0 means "zoom level 0 in the array"
+- Simplify to just incrementing/decrementing array indices
+
 ## Output Structure
 
 ```
