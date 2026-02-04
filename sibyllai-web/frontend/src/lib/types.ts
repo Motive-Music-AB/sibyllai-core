@@ -28,7 +28,7 @@ export interface AnalyzeCuesRequest {
 
 export interface AnalysisResponse {
   session_id: string
-  project: SibylProject
+  total_segments: number
   output_path: string
 }
 
@@ -37,6 +37,17 @@ export interface AnalysisProgressUpdate {
   total: number
   status: string
   progress_percent: number
+}
+
+export interface AnalysisStatusResponse {
+  session_id: string
+  complete: boolean
+  current?: number
+  total?: number
+  progress_percent: number
+  status: string
+  project: SibylProject | null
+  error: string | null
 }
 
 // .sibyl.json Format Types
@@ -84,8 +95,11 @@ export interface MusicalProfile {
 
 export interface DetectedAttributes {
   instruments_yamnet: Record<string, number>
+  genres_yamnet: Record<string, number>  // YAMNet genre detection (pop, rock, jazz, etc.)
   moods: Record<string, number>
-  clap_genre: Record<string, number>
+  clap_style: Record<string, number>  // CLAP film-scoring style (orchestral, hybrid, etc.)
+  clap_genre?: Record<string, number>  // Legacy field for backwards compatibility
+  clap_instrumentation: Record<string, number>
   clap_production: Record<string, number>
   clap_energy: Record<string, number>
   clap_era: Record<string, number>
@@ -94,10 +108,27 @@ export interface DetectedAttributes {
 
 export interface CuratedAttributes {
   instruments: string[]
+  genres: string[]  // YAMNet genres (pop, rock, electronic, etc.)
   moods: string[]
-  genre: string[]
+  style: string[]  // CLAP film-scoring style (orchestral, hybrid, cinematic)
+  genre?: string[]  // Legacy field for backwards compatibility
+  instrumentation: string[]
   production: string[]
   energy: string[]
   era: string[]
   function: string[]
+}
+
+// Request type for updating cue curated attributes
+export interface CueUpdateRequest {
+  instruments?: string[]
+  genres?: string[]
+  style?: string[]
+  moods?: string[]
+}
+
+// Response from cue update
+export interface CueUpdateResponse {
+  status: string
+  cue_id: string
 }

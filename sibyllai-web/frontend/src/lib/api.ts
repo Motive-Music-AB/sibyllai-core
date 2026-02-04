@@ -5,7 +5,10 @@ import type {
   SegmentPreviewResponse,
   AnalyzeCuesRequest,
   AnalysisResponse,
+  AnalysisStatusResponse,
   SibylProject,
+  CueUpdateRequest,
+  CueUpdateResponse,
 } from './types'
 
 const API_BASE = '/api'
@@ -40,9 +43,18 @@ export const api = {
 
   /**
    * Phase 2: Full analysis on user-confirmed segments
+   * Returns immediately with session_id; analysis runs in background
    */
   async analyzeCues(request: AnalyzeCuesRequest): Promise<AnalysisResponse> {
     const response = await axios.post<AnalysisResponse>(`${API_BASE}/analyze-cues`, request)
+    return response.data
+  },
+
+  /**
+   * Get analysis progress status (poll this for updates)
+   */
+  async getAnalysisStatus(sessionId: string): Promise<AnalysisStatusResponse> {
+    const response = await axios.get<AnalysisStatusResponse>(`${API_BASE}/analysis-status/${sessionId}`)
     return response.data
   },
 
@@ -59,6 +71,17 @@ export const api = {
    */
   async cleanup(fileId: string): Promise<void> {
     await axios.delete(`${API_BASE}/cleanup/${fileId}`)
+  },
+
+  /**
+   * Update curated attributes for a cue
+   */
+  async updateCue(sessionId: string, cueId: string, update: CueUpdateRequest): Promise<CueUpdateResponse> {
+    const response = await axios.put<CueUpdateResponse>(
+      `${API_BASE}/projects/${sessionId}/cues/${cueId}`,
+      update
+    )
+    return response.data
   },
 }
 

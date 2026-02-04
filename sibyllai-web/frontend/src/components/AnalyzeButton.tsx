@@ -1,9 +1,9 @@
-import { useCallback } from 'react'
+import { useCallback, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { useAppStore } from '@/lib/store'
-import { api, createProgressWebSocket } from '@/lib/api'
+import { api } from '@/lib/api'
 
 export function AnalyzeButton() {
   const {
@@ -18,6 +18,17 @@ export function AnalyzeButton() {
     setShowControls,
   } = useAppStore()
 
+  const pollingRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        clearInterval(pollingRef.current)
+      }
+    }
+  }, [])
+
   const handleAnalyze = useCallback(async () => {
     if (!fileId || selectedSegments.length === 0) return
 
@@ -25,7 +36,7 @@ export function AnalyzeButton() {
     setAnalysisProgress(0, 'Starting analysis...')
 
     try {
-      // Start analysis on selected segments only
+      // Start analysis (returns immediately with session_id)
       const response = await api.analyzeCues({
         file_id: fileId,
         segments: selectedSegments,
@@ -33,23 +44,49 @@ export function AnalyzeButton() {
         threshold: 0.5,
       })
 
-      // Connect to WebSocket for progress updates
-      const ws = createProgressWebSocket(response.session_id, (update) => {
-        setAnalysisProgress(update.progress_percent, update.status)
-      })
+      const sessionId = response.session_id
 
-      // Store project when complete
-      setProject(response.session_id, response.project)
+      // Poll for progress updates
+      const pollStatus = async () => {
+        try {
+          const status = await api.getAnalysisStatus(sessionId)
 
-      // Hide controls after successful analysis
-      setShowControls(false)
+          // Update progress
+          setAnalysisProgress(status.progress_percent, status.status)
 
-      // Close WebSocket
-      ws.close()
+          if (status.complete) {
+            // Stop polling
+            if (pollingRef.current) {
+              clearInterval(pollingRef.current)
+              pollingRef.current = null
+            }
+
+            if (status.error) {
+              console.error('Analysis error:', status.error)
+              setAnalysisProgress(0, `Analysis failed: ${status.error}`)
+            } else if (status.project) {
+              // Store project when complete
+              setProject(sessionId, status.project)
+              // Hide controls after successful analysis
+              setShowControls(false)
+            }
+
+            setIsAnalyzing(false)
+          }
+        } catch (err) {
+          console.error('Error polling status:', err)
+        }
+      }
+
+      // Start polling every 500ms
+      pollingRef.current = setInterval(pollStatus, 500)
+
+      // Also poll immediately
+      await pollStatus()
+
     } catch (err) {
       console.error('Analysis error:', err)
       setAnalysisProgress(0, 'Analysis failed')
-    } finally {
       setIsAnalyzing(false)
     }
   }, [fileId, selectedSegments, setIsAnalyzing, setAnalysisProgress, setProject, setShowControls])

@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 
 function App() {
-  const { fileId, project, showControls, setShowControls, resetToSegmentation } = useAppStore()
+  const { fileId, project, showControls, setShowControls, resetToSegmentation, reset } = useAppStore()
 
   return (
     <div className="min-h-screen bg-background p-8">
@@ -17,11 +17,23 @@ function App() {
       <DebugConsole />
       <div className="max-w-[1800px] mx-auto space-y-8">
         {/* Header */}
-        <header className="text-center space-y-2">
-          <h1 className="text-4xl font-bold">Motive</h1>
-          <p className="text-muted-foreground">
-            Music Analysis for MX & Media Files
-          </p>
+        <header className="space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="flex-1" />
+            <div className="text-center">
+              <h1 className="text-4xl font-bold">Motive</h1>
+              <p className="text-muted-foreground">
+                Music Analysis for MX & Media Files
+              </p>
+            </div>
+            <div className="flex-1 flex justify-end">
+              {fileId && (
+                <Button variant="outline" size="sm" onClick={reset}>
+                  New Import
+                </Button>
+              )}
+            </div>
+          </div>
         </header>
 
         {/* Upload Section */}

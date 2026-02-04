@@ -37,6 +37,7 @@ def create_cue(
     bpm: float | str,
     key: str,
     instruments: dict[str, float],
+    genres: dict[str, float],
     moods: list[str],
     valence: float,
     arousal: float,
@@ -51,10 +52,11 @@ def create_cue(
         fps: Frames per second for timecode
         bpm: Detected BPM or "Unknown"
         key: Detected key (e.g., "C Major")
-        instruments: Dict of instrument name -> confidence score
+        instruments: Dict of instrument name -> confidence score (YAMNet)
+        genres: Dict of genre name -> confidence score (YAMNet)
         moods: List of mood tags
         valence/arousal: Emotional dimensions (0-1)
-        clap_categorized: Categorized CLAP tags
+        clap_categorized: Categorized CLAP tags (film-scoring vocabulary)
 
     Returns:
         Cue dictionary matching the MVP data model
@@ -65,6 +67,7 @@ def create_cue(
         return [item[0] for item in sorted_items[:n]]
 
     curated_instruments = get_top_n(instruments, 8) if instruments else []
+    curated_genres = get_top_n(genres, 3) if genres else []  # Top 3 YAMNet genres
     curated_moods = moods[:2] if moods else []  # Top 2 moods
 
     # Extract top tags per CLAP category
@@ -94,8 +97,9 @@ def create_cue(
         "musical_profile": {
             "detected": {
                 "instruments_yamnet": instruments,
+                "genres_yamnet": genres,  # YAMNet genre detection (pop, rock, jazz, etc.)
                 "moods": {mood: 1.0 for mood in moods},  # Music2Emo doesn't provide scores per mood
-                "clap_genre": clap_categorized.get("genre", {}),
+                "clap_style": clap_categorized.get("genre", {}),  # CLAP film-scoring style (orchestral, hybrid, etc.)
                 "clap_instrumentation": clap_categorized.get("instrumentation", {}),
                 "clap_production": clap_categorized.get("production", {}),
                 "clap_energy": clap_categorized.get("energy", {}),
@@ -104,8 +108,9 @@ def create_cue(
             },
             "curated": {
                 "instruments": curated_instruments,
+                "genres": curated_genres,  # YAMNet genres (pop, rock, electronic, etc.)
                 "moods": curated_moods,
-                "genre": curated_clap.get("genre", []),
+                "style": curated_clap.get("genre", []),  # CLAP film-scoring style (orchestral, hybrid, cinematic)
                 "instrumentation": curated_clap.get("instrumentation", []),
                 "production": curated_clap.get("production", []),
                 "energy": curated_clap.get("energy", []),

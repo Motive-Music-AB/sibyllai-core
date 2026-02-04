@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { SibylProject } from './types'
+import type { SibylProject, CuratedAttributes } from './types'
 
 interface AppState {
   // Upload state
@@ -27,6 +27,7 @@ interface AppState {
 
   // UI state
   activeCueId: string | null
+  playingCueId: string | null
   showControls: boolean
 
   // Actions
@@ -47,7 +48,9 @@ interface AppState {
   setAnalysisProgress: (progress: number, status: string) => void
   setProject: (sessionId: string, project: SibylProject) => void
   setActiveCueId: (cueId: string | null) => void
+  setPlayingCueId: (cueId: string | null) => void
   setShowControls: (show: boolean) => void
+  updateCueInProject: (cueId: string, curated: Partial<CuratedAttributes>) => void
   reset: () => void
   resetToSegmentation: () => void
 }
@@ -71,6 +74,7 @@ const initialState = {
   sessionId: null,
   project: null,
   activeCueId: null,
+  playingCueId: null,
   showControls: true,
 }
 
@@ -196,8 +200,28 @@ export const useAppStore = create<AppState>((set) => ({
   setActiveCueId: (cueId) =>
     set({ activeCueId: cueId }),
 
+  setPlayingCueId: (cueId) =>
+    set({ playingCueId: cueId }),
+
   setShowControls: (show) =>
     set({ showControls: show }),
+
+  updateCueInProject: (cueId, curated) =>
+    set((state) => {
+      if (!state.project) return state
+      const updatedCues = state.project.cues.map((cue) =>
+        cue.id === cueId
+          ? {
+              ...cue,
+              musical_profile: {
+                ...cue.musical_profile,
+                curated: { ...cue.musical_profile.curated, ...curated },
+              },
+            }
+          : cue
+      )
+      return { project: { ...state.project, cues: updatedCues } }
+    }),
 
   reset: () =>
     set(initialState),
@@ -210,6 +234,7 @@ export const useAppStore = create<AppState>((set) => ({
       analysisProgress: 0,
       analysisStatus: '',
       activeCueId: null,
+      playingCueId: null,
       showControls: true,
     }),
 }))

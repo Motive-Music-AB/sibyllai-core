@@ -8,6 +8,8 @@ import uuid
 import asyncio
 from typing import Optional
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 
 # Add sibyllai_core and sibyllai_web to path
 sys.path.insert(0, str(Path(__file__).parents[3] / "src"))
@@ -26,7 +28,7 @@ app = FastAPI(
 # CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:5174", "http://127.0.0.1:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,6 +43,12 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 # WebSocket connections tracker
 active_connections: dict[str, WebSocket] = {}
+
+# Analysis status tracking (for progress updates)
+analysis_status: dict[str, dict] = {}
+
+# Thread pool for background analysis
+executor = ThreadPoolExecutor(max_workers=2)
 
 
 # Request/Response Models
@@ -75,6 +83,14 @@ class DebugLogEntry(BaseModel):
     type: str
     message: str
     timestamp: str
+
+
+class CueUpdateRequest(BaseModel):
+    """Request model for updating curated attributes of a cue."""
+    instruments: Optional[list[str]] = None
+    genres: Optional[list[str]] = None
+    style: Optional[list[str]] = None
+    moods: Optional[list[str]] = None
 
 
 # Endpoints
@@ -191,11 +207,68 @@ async def segment_preview(request: SegmentPreviewRequest):
         raise HTTPException(status_code=500, detail=f"Segmentation failed: {str(e)}")
 
 
+def run_analysis_in_background(
+    session_id: str,
+    file_path: Path,
+    segments: list,
+    output_path: Path,
+    fps: int,
+    threshold: float
+):
+    """Run analysis in background thread and update status dict."""
+    try:
+        def progress_callback(current: int, total: int, status: str):
+            # Update status dict (thread-safe for reads)
+            analysis_status[session_id] = {
+                "current": current,
+                "total": total,
+                "status": status,
+                "progress_percent": (current / total) * 100 if total > 0 else 0,
+                "complete": False,
+                "error": None,
+                "project": None
+            }
+
+        # Run analysis
+        project = analyze_segments(
+            audio_path=file_path,
+            segments=segments,
+            output_dir=output_path,
+            fps=fps,
+            thr=threshold,
+            progress_callback=progress_callback
+        )
+
+        # Mark complete with project data
+        analysis_status[session_id] = {
+            "current": len(segments),
+            "total": len(segments),
+            "status": "Complete!",
+            "progress_percent": 100,
+            "complete": True,
+            "error": None,
+            "project": project
+        }
+
+    except Exception as e:
+        # Mark as failed
+        analysis_status[session_id] = {
+            "current": 0,
+            "total": len(segments),
+            "status": f"Error: {str(e)}",
+            "progress_percent": 0,
+            "complete": True,
+            "error": str(e),
+            "project": None
+        }
+
+
 @app.post("/api/analyze-cues")
 async def analyze_cues(request: AnalyzeCuesRequest):
     """
     Phase 2: Full analysis on confirmed segments.
     Runs expensive detectors (BPM, CLAP, mood, instruments, key).
+    Returns immediately with session_id; analysis runs in background.
     """
     # Find uploaded file
     file_path = None
@@ -213,39 +286,74 @@ async def analyze_cues(request: AnalyzeCuesRequest):
     output_path = OUTPUT_DIR / session_id
     output_path.mkdir(parents=True, exist_ok=True)
 
-    try:
-        # Progress callback for WebSocket updates
-        async def progress_callback(current: int, total: int, status: str):
-            if session_id in active_connections:
-                ws = active_connections[session_id]
-                try:
-                    await ws.send_json({
-                        "current": current,
-                        "total": total,
-                        "status": status,
-                        "progress_percent": (current / total) * 100
-                    })
-                except:
-                    pass
+    # Initialize status
+    analysis_status[session_id] = {
+        "current": 0,
+        "total": len(request.segments),
+        "status": "Starting analysis...",
+        "progress_percent": 0,
+        "complete": False,
+        "error": None,
+        "project": None
+    }
 
-        # Run analysis
-        project = analyze_segments(
-            audio_path=file_path,
-            segments=request.segments,
-            output_dir=output_path,
-            fps=request.fps,
-            thr=request.threshold,
-            progress_callback=None  # WebSocket handled separately for now
-        )
+    # Start analysis in background thread
+    executor.submit(
+        run_analysis_in_background,
+        session_id,
+        file_path,
+        request.segments,
+        output_path,
+        request.fps,
+        request.threshold
+    )
 
+    # Return immediately with session_id
+    return {
+        "session_id": session_id,
+        "total_segments": len(request.segments),
+        "output_path": str(output_path)
+    }
+
+
+@app.get("/api/analysis-status/{session_id}")
+async def get_analysis_status(session_id: str):
+    """Get current analysis progress for a session."""
+    if session_id not in analysis_status:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    status = analysis_status[session_id]
+
+    # If complete and has project, return full response
+    if status["complete"] and status["project"]:
         return {
             "session_id": session_id,
-            "project": project,
-            "output_path": str(output_path)
+            "complete": True,
+            "progress_percent": 100,
+            "status": "Complete!",
+            "project": status["project"],
+            "error": None
         }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+    elif status["complete"] and status["error"]:
+        return {
+            "session_id": session_id,
+            "complete": True,
+            "progress_percent": 0,
+            "status": status["status"],
+            "project": None,
+            "error": status["error"]
+        }
+    else:
+        return {
+            "session_id": session_id,
+            "complete": False,
+            "current": status["current"],
+            "total": status["total"],
+            "progress_percent": status["progress_percent"],
+            "status": status["status"],
+            "project": None,
+            "error": None
+        }
 
 
 @app.get("/api/projects/{session_id}")
@@ -279,6 +387,62 @@ async def websocket_progress(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         if session_id in active_connections:
             del active_connections[session_id]
+
+
+@app.put("/api/projects/{session_id}/cues/{cue_id}")
+async def update_cue(session_id: str, cue_id: str, update: CueUpdateRequest):
+    """
+    Update curated attributes for a specific cue.
+    Persists changes to the project.sibyl.json file.
+    """
+    import json
+
+    project_path = OUTPUT_DIR / session_id / "project.sibyl.json"
+
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        # Load existing project
+        with open(project_path, 'r') as f:
+            project = json.load(f)
+
+        # Find and update the cue
+        cue_found = False
+        for cue in project.get("cues", []):
+            if cue.get("id") == cue_id:
+                cue_found = True
+                curated = cue.get("musical_profile", {}).get("curated", {})
+
+                # Update only the fields that were provided
+                if update.instruments is not None:
+                    curated["instruments"] = update.instruments
+                if update.genres is not None:
+                    curated["genres"] = update.genres
+                if update.style is not None:
+                    curated["style"] = update.style
+                if update.moods is not None:
+                    curated["moods"] = update.moods
+
+                # Write back to cue
+                if "musical_profile" not in cue:
+                    cue["musical_profile"] = {}
+                cue["musical_profile"]["curated"] = curated
+                break
+
+        if not cue_found:
+            raise HTTPException(status_code=404, detail=f"Cue {cue_id} not found")
+
+        # Save back to disk
+        with open(project_path, 'w') as f:
+            json.dump(project, f, indent=2)
+
+        return {"status": "updated", "cue_id": cue_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update cue: {str(e)}")
 
 
 # Optional: Cleanup endpoint

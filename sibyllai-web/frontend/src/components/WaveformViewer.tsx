@@ -20,7 +20,6 @@ export function WaveformViewer() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isReady, setIsReady] = useState(false)
   const [zoom, setZoom] = useState(0)
-  const [playingCueId, setPlayingCueId] = useState<string | null>(null)
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
   const [ticks, setTicks] = useState<Array<{ position: number; timecode: string; isMajor: boolean }>>([])
   const [waveformWidth, setWaveformWidth] = useState(0)
@@ -43,6 +42,8 @@ export function WaveformViewer() {
     project,
     activeCueId,
     setActiveCueId,
+    playingCueId,
+    setPlayingCueId,
     startTimecode,
     framerate,
   } = useAppStore()
@@ -236,7 +237,7 @@ export function WaveformViewer() {
   }
 
   // Play a specific cue
-  const playActiveCue = () => {
+  const playActiveCue = useCallback(() => {
     if (!wavesurferRef.current || !activeCueId || !project) return
 
     const activeCue = project.cues.find((cue) => cue.id === activeCueId)
@@ -251,7 +252,8 @@ export function WaveformViewer() {
       return
     }
 
-    // Play from current playhead position
+    // Seek to cue start and play
+    ws.setTime(activeCue.start)
     ws.play()
     setPlayingCueId(activeCueId)
 
@@ -267,7 +269,7 @@ export function WaveformViewer() {
     ws.once('pause', () => {
       ws.un('audioprocess', checkPosition)
     })
-  }
+  }, [activeCueId, project, isPlaying, setPlayingCueId])
 
   // Handle spacebar to play/pause waveform or active cue
   useEffect(() => {
@@ -292,8 +294,7 @@ export function WaveformViewer() {
 
     window.addEventListener('keydown', handleKeyPress)
     return () => window.removeEventListener('keydown', handleKeyPress)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCueId, project, isPlaying, playingCueId])
+  }, [activeCueId, project, playActiveCue])
 
   // Close context menu on click outside
   useEffect(() => {
@@ -382,6 +383,11 @@ export function WaveformViewer() {
 
         // Add event handlers
         if (region && region.element) {
+          // Add visual separation between adjacent cues (border on both sides)
+          region.element.style.borderLeft = '2px solid rgba(100, 116, 139, 0.6)'
+          region.element.style.borderRight = '2px solid rgba(100, 116, 139, 0.6)'
+          region.element.style.boxSizing = 'border-box'
+
           // Create and add select button programmatically
           const button = document.createElement('button')
           button.className = 'region-select-btn'

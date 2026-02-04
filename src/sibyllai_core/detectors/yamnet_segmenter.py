@@ -141,12 +141,16 @@ def extract_instruments(audio_data, sr=16000, top_n=5):
     instrument_indices = {}
     for instrument_name in class_names:
         lower_name = instrument_name.lower()
-        # Check if this class name contains instrument keywords
+        # Check if this class name contains instrument or vocal keywords
         if any(keyword in lower_name for keyword in [
+            # Instruments
             'piano', 'guitar', 'violin', 'drum', 'brass', 'string',
             'trumpet', 'saxophone', 'flute', 'clarinet', 'trombone',
             'cello', 'bass', 'harp', 'organ', 'accordion', 'harmonica',
-            'synthesizer', 'keyboard', 'percussion'
+            'synthesizer', 'keyboard', 'percussion',
+            # Vocals
+            'singing', 'humming', 'vocal', 'choir', 'rapping', 'chant',
+            'speech', 'whistling', 'beatbox'
         ]):
             idx = class_names.index(instrument_name)
             instrument_indices[instrument_name] = idx
@@ -177,3 +181,83 @@ def extract_instruments(audio_data, sr=16000, top_n=5):
     sorted_instruments = sorted(instrument_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
 
     return dict(sorted_instruments)
+
+
+def extract_genres(audio_data, sr=16000, top_n=5):
+    """
+    Extract top N detected music genres from audio using YAMNet.
+
+    Args:
+        audio_data: Audio waveform as numpy array (mono)
+        sr: Sample rate (will be resampled to 16kHz if needed)
+        top_n: Number of top genres to return
+
+    Returns:
+        Dictionary mapping genre name to confidence score:
+        {"Pop music": 0.45, "Electronic music": 0.32, "Rock music": 0.18}
+    """
+    # Load YAMNet model
+    yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
+
+    # Load class map
+    class_map_path = os.path.join(os.path.dirname(__file__), "yamnet_class_map.csv")
+    if not os.path.exists(class_map_path):
+        class_map_url = "https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv"
+        import urllib.request
+        urllib.request.urlretrieve(class_map_url, class_map_path)
+
+    class_names_df = pd.read_csv(class_map_path)
+    class_names = class_names_df["display_name"].tolist()
+
+    # Genre-related keywords from YAMNet classes (indices 211-269 are mostly genres)
+    genre_keywords = [
+        'pop music', 'hip hop', 'rock music', 'heavy metal', 'punk rock',
+        'grunge', 'progressive rock', 'rock and roll', 'psychedelic',
+        'rhythm and blues', 'soul music', 'reggae', 'country', 'swing',
+        'bluegrass', 'funk', 'folk music', 'middle eastern', 'jazz',
+        'disco', 'classical music', 'opera', 'electronic music', 'house music',
+        'techno', 'dubstep', 'drum and bass', 'electronica', 'electronic dance',
+        'ambient music', 'trance', 'latin', 'salsa', 'flamenco', 'blues',
+        'music for children', 'new-age', 'vocal music', 'a capella',
+        'afrobeat', 'christian music', 'gospel', 'ska', 'traditional music',
+        'indie', 'soundtrack', 'theme music', 'lullaby', 'video game music',
+        'christmas music', 'dance music', 'wedding music',
+        # Mood/energy descriptors from YAMNet
+        'happy music', 'sad music', 'tender music', 'exciting music',
+        'angry music', 'scary music'
+    ]
+
+    # Build genre index map
+    genre_indices = {}
+    for class_name in class_names:
+        lower_name = class_name.lower()
+        if any(keyword in lower_name for keyword in genre_keywords):
+            idx = class_names.index(class_name)
+            genre_indices[class_name] = idx
+
+    # Ensure mono audio
+    if len(audio_data.shape) > 1:
+        audio_data = np.mean(audio_data, axis=1)
+
+    # Resample to 16kHz if needed
+    if sr != 16000:
+        import librosa
+        audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=16000)
+
+    audio_data = audio_data.astype(np.float32)
+
+    # Run YAMNet inference
+    scores, _, _ = yamnet_model(audio_data)
+
+    # Average scores across all frames
+    avg_scores = np.mean(scores.numpy(), axis=0)
+
+    # Extract genre scores
+    genre_scores = {}
+    for genre_name, idx in genre_indices.items():
+        genre_scores[genre_name] = float(avg_scores[idx])
+
+    # Sort by score and return top N
+    sorted_genres = sorted(genre_scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
+
+    return dict(sorted_genres)

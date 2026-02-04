@@ -8,7 +8,7 @@ import soundfile as sf
 import librosa
 import essentia.standard as es
 
-from sibyllai_core.detectors.yamnet_segmenter import extract_instruments
+from sibyllai_core.detectors.yamnet_segmenter import extract_instruments, extract_genres
 from sibyllai_core.detectors.chord_detector import analyze_chords
 from sibyllai_core.detectors import music_probability, tag_chunk
 from sibyllai_core.detectors.m2e_wrapper import global_moods
@@ -91,6 +91,7 @@ def analyze_segments(
         clap_categorized = {}
         clap_top_overall = []
         instruments = {}
+        genres = {}
         detected_key = "Unknown"
 
         try:
@@ -111,6 +112,15 @@ def analyze_segments(
             except Exception as e:
                 print(f"[WARNING] Instrument extraction failed for segment {i}: {e}")
 
+            # Genre detection via YAMNet
+            try:
+                if progress_callback:
+                    progress_callback(i, total_segments, f"Segment {i}: Detecting genres")
+                genres = extract_genres(music_mono, sr=sr, top_n=10)
+                print(f"[DEBUG] Detected genres for segment {i}: {genres}")
+            except Exception as e:
+                print(f"[WARNING] Genre extraction failed for segment {i}: {e}")
+
             # Music probability
             try:
                 if progress_callback:
@@ -122,7 +132,7 @@ def analyze_segments(
             # CLAP tags
             try:
                 if progress_callback:
-                    progress_callback(i, total_segments, f"Segment {i}: Analyzing genre/style (CLAP)")
+                    progress_callback(i, total_segments, f"Segment {i}: Analyzing style")
                 clap_categorized = tag_chunk(music_mono, sr)
 
                 # Extract top tags per category
@@ -181,6 +191,7 @@ def analyze_segments(
                 bpm=bpm,
                 key=detected_key,
                 instruments=instruments,
+                genres=genres,
                 moods=moods_list,
                 valence=valence,
                 arousal=arousal,
@@ -222,6 +233,7 @@ def analyze_segments(
                 bpm="Unknown",
                 key="Unknown",
                 instruments={},
+                genres={},
                 moods=[],
                 valence=0.0,
                 arousal=0.0,
