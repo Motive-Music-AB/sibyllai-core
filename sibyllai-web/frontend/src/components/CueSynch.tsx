@@ -23,7 +23,7 @@ export function CueSynch() {
   const { project, fileName, framerate } = useAppStore()
 
   const [file, setFile] = useState<File | null>(null)
-  const [frameRateSetting, setFrameRateSetting] = useState<string>('auto')
+  const [frameRateSetting] = useState<string>('auto')
   const [cueData, setCueData] = useState<CueData | null>(null)
   const [timeColumn, setTimeColumn] = useState<string>('')
   const [selectedFields, setSelectedFields] = useState<string[]>([])
@@ -126,18 +126,6 @@ export function CueSynch() {
     }
   }
 
-  const handleUseAnalysisData = () => {
-    setUseAnalysisData(true)
-    setFile(null)
-    setError('')
-    const data = convertProjectToCueData()
-    if (data) {
-      setCueData(data)
-      setTimeColumn(data.detectedTimeColumn)
-      setSelectedFields(getDefaultSelectedFields(data.headers, data.detectedTimeColumn))
-    }
-  }
-
   const handleGenerateWAV = () => {
     if (!cueData || !timeColumn || selectedFields.length === 0) {
       setError('Please select time column and at least one marker field')
@@ -182,11 +170,6 @@ export function CueSynch() {
     const row = cueData.rows[0]
     const parts = selectedFields.map((field) => row[field]).filter(Boolean)
     return parts.join(' - ') || 'Marker'
-  }
-
-  const getTimecodePreview = () => {
-    if (!cueData?.rows || cueData.rows.length === 0 || !timeColumn) return []
-    return cueData.rows.slice(0, 3).map((row) => row[timeColumn]).filter(Boolean)
   }
 
   const hasAnalysisData = !!project && project.cues.length > 0

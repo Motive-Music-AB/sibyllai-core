@@ -8,29 +8,36 @@ import { DebugConsole } from '@/components/DebugConsole'
 import { CueSynch } from '@/components/CueSynch'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
-import { exportProjectToCSV } from '@/lib/csv-export'
 
 function App() {
-  const { fileId, project, showControls, setShowControls, resetToSegmentation, reset, currentPage, setCurrentPage } = useAppStore()
+  const { fileId, project, resetToSegmentation, reset, currentPage, setCurrentPage } = useAppStore()
 
   return (
-    <div className="min-h-screen bg-background p-8">
+    <div className="min-h-screen relative overflow-hidden selection:bg-primary/30 selection:text-foreground">
       {/* Global Debug Console */}
       <DebugConsole />
-      <div className="max-w-[1800px] mx-auto space-y-8">
+
+      <div className="relative z-10 max-w-[1800px] mx-auto px-6 py-12 lg:px-12 space-y-12">
         {/* Header */}
-        <header className="space-y-4">
+        <header className="relative">
           <div className="flex items-center justify-between">
             <div className="flex-1" />
-            <div className="text-center">
-              <h1 className="text-4xl font-bold">Motive</h1>
-              <p className="text-muted-foreground">
-                Music Analysis for MX & Media Files
+            <div className="text-center group">
+              <h1 className="text-[78px] font-semibold tracking-tight font-display -mb-2 bg-gradient-to-b from-white to-foreground/40 bg-clip-text text-transparent group-hover:from-primary group-hover:to-primary/40 transition-all duration-500 cursor-default">
+                Motive
+              </h1>
+              <p className="text-foreground-muted font-medium tracking-[0.25em] uppercase text-xs">
+                Music Analysis for Media Files
               </p>
             </div>
             <div className="flex-1 flex justify-end">
-              {currentPage === 'analysis' && fileId && !project && (
-                <Button variant="outline" size="sm" onClick={reset}>
+              {((currentPage === 'analysis' && fileId && !project) || currentPage === 'cuesynch') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={reset}
+                  className="glass-lighter hover:bg-primary/20 border-primary/20 transition-all duration-300"
+                >
                   New Import
                 </Button>
               )}
@@ -38,71 +45,76 @@ function App() {
           </div>
         </header>
 
-        {/* Analysis Page */}
-        {currentPage === 'analysis' && (
-          <>
-            {/* Upload Section */}
-            {!fileId && <FileUpload />}
+        {/* Main Content Areas */}
+        <main>
+          {currentPage === 'analysis' ? (
+            <div className="space-y-12">
+              {/* Upload Section */}
+              {!fileId && <FileUpload />}
 
-            {/* Main Analysis View - Always show waveform when file is loaded */}
-            {fileId && (
-          <div className="space-y-6">
-            {/* Selection Controls - Above Waveform */}
-            <SelectionControls />
+              {/* Main Analysis View */}
+              {fileId && (
+                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+                  {/* Selection Controls - Above Waveform */}
+                  <SelectionControls />
 
-            {/* Full-width Waveform at Top - Always Visible */}
-            <WaveformViewer />
-
-            {/* Collapsible Controls Section */}
-            {!project && (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <ThresholdControls />
-                <AnalyzeButton />
-              </div>
-            )}
-
-            {project && (
-              <div className="space-y-4">
-                {/* Collapsible Controls Header */}
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold">Analysis Results</h2>
-                    <p className="text-muted-foreground">
-                      {project.cues.length} cues analyzed - Click cues above or cards below to navigate
-                    </p>
+                  {/* Full-width Waveform */}
+                  <div className="glass-glow rounded-2xl overflow-hidden p-1">
+                    <WaveformViewer />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={resetToSegmentation}
-                    >
-                      Back
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={() => setCurrentPage('cuesynch')}
-                    >
-                      Export to DAW or NLE
-                    </Button>
-                  </div>
-                </div>
 
-                {/* Cue Cards */}
-                <div className="grid gap-4">
-                  {project.cues.map((cue, index) => (
-                    <CueCard key={cue.id} cue={cue} index={index} />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-            )}
-          </>
-        )}
+                  {/* Controls or Results */}
+                  {!project ? (
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                      <ThresholdControls />
+                      <AnalyzeButton />
+                    </div>
+                  ) : (
+                    <div className="space-y-8 animate-in fade-in duration-500">
+                      {/* Results Header */}
+                      <div className="flex items-center justify-between glass p-6 rounded-2xl">
+                        <div>
+                          <h2 className="text-2xl font-medium font-display">Analysis Results</h2>
+                          <p className="text-foreground-muted">
+                            {project.cues.length} cues analyzed - Click cues above or cards below to navigate
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={resetToSegmentation}
+                            className="glass-lighter"
+                          >
+                            Back
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => setCurrentPage('cuesynch')}
+                            className="btn-primary px-6"
+                          >
+                            Export to DAW or NLE
+                          </Button>
+                        </div>
+                      </div>
 
-        {/* CueSynch Page */}
-        {currentPage === 'cuesynch' && <CueSynch />}
+                      {/* Cue Cards */}
+                      <div className="grid gap-6">
+                        {project.cues.map((cue, index) => (
+                          <CueCard key={cue.id} cue={cue} index={index} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <CueSynch />
+            </div>
+          )}
+        </main>
       </div>
     </div>
   )

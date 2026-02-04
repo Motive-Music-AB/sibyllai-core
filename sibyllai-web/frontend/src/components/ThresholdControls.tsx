@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
@@ -25,15 +25,9 @@ export function ThresholdControls() {
   const [localMinCueLength, setLocalMinCueLength] = useState(minCueLength)
   const [showSettings, setShowSettings] = useState(false)
 
-  // NO automatic debounced updates - user must click "Update Preview" button
-  // This prevents the segment explosion bug when adjusting sliders
-
   const handlePreview = useCallback(async () => {
     if (!fileId) return
-
     setIsSegmenting(true)
-
-    // Update store with current local values
     setMusicThreshold(localThreshold)
     setMinGap(localMinGap)
     setMinCueLength(localMinCueLength)
@@ -45,7 +39,6 @@ export function ThresholdControls() {
         min_gap: localMinGap,
         min_cue_length: localMinCueLength,
       })
-
       setSegments(response.segments, response.duration)
     } catch (err) {
       console.error('Segmentation error:', err)
@@ -54,49 +47,59 @@ export function ThresholdControls() {
     }
   }, [fileId, localThreshold, localMinGap, localMinCueLength, setSegments, setIsSegmenting, setMusicThreshold, setMinGap, setMinCueLength])
 
-  if (!fileId) {
-    return null
-  }
+  if (!fileId) return null
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle>Cue Detection</CardTitle>
-        <CardDescription>
-          Adjust threshold to control music cue detection
+    <Card className="w-full glass border-white/5 p-4 animate-in fade-in slide-in-from-left-4 duration-700">
+      <CardHeader className="pb-4">
+        <CardTitle className="text-2xl font-display font-medium">Cue Detection</CardTitle>
+        <CardDescription className="text-foreground-muted">
+          Automatically identify precise in and out points for musical cues, stingers, and transitions with frame accuracy.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <Button
-          onClick={handlePreview}
-          disabled={isSegmenting}
-          className="w-full"
-        >
-          {isSegmenting ? 'Detecting cues...' : segments.length > 0 ? 'Update Preview' : 'Detect Cues'}
-        </Button>
+      <CardContent className="space-y-6">
+        <div className="flex flex-col gap-3">
+          <Button
+            onClick={handlePreview}
+            disabled={isSegmenting}
+            className="btn-primary h-14 text-lg rounded-xl"
+          >
+            {isSegmenting ? (
+              <div className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
+                Scanning Waveform...
+              </div>
+            ) : segments.length > 0 ? 'Update Preview' : 'Run Cue Detection'}
+          </Button>
 
-        <Button
-          onClick={() => setShowSettings(!showSettings)}
-          variant="outline"
-          className="w-full"
-        >
-          {showSettings ? 'Hide Settings' : 'Settings'}
-        </Button>
+          <Button
+            onClick={() => setShowSettings(!showSettings)}
+            variant="ghost"
+            className={`h-10 rounded-lg text-xs font-bold uppercase tracking-widest transition-colors ${showSettings ? 'bg-white/10 text-primary' : 'text-foreground-muted hover:bg-white/5 hover:text-foreground'}`}
+          >
+            {showSettings ? 'Hide Advanced Settings' : 'Advanced Settings'}
+          </Button>
+        </div>
 
         <div
-          className="overflow-hidden transition-all duration-300 ease-in-out"
+          className="overflow-hidden transition-all duration-500 ease-in-out"
           style={{
             maxHeight: showSettings ? '1000px' : '0px',
             opacity: showSettings ? 1 : 0
           }}
         >
-          <div className="space-y-6 pt-2">
-            <div className="space-y-3">
+          <div className="space-y-8 pt-4 pb-2">
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">
-                  Detection Sensitivity
-                </label>
-                <span className="text-sm text-muted-foreground">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-bold tracking-tight text-foreground">
+                    In/Out Sensitivity
+                  </label>
+                  <p className="text-[10px] text-foreground-subtle font-medium uppercase tracking-wider">
+                    Threshold for music start/end
+                  </p>
+                </div>
+                <span className="glass-lighter px-3 py-1 rounded-lg font-mono font-bold text-xs text-primary border border-primary/20">
                   {localThreshold < 0.001 ? localThreshold.toFixed(6) : localThreshold < 0.01 ? localThreshold.toFixed(4) : localThreshold.toFixed(2)}
                 </span>
               </div>
@@ -107,18 +110,21 @@ export function ThresholdControls() {
                 max={0.03}
                 step={0.0001}
                 disabled={isSegmenting}
+                className="py-2"
               />
-              <p className="text-xs text-muted-foreground">
-                Lower values = more sensitive (captures quieter/subtle music). Higher values = stricter (only clear/loud music)
-              </p>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">
-                  Minimum Silence Gap
-                </label>
-                <span className="text-sm text-muted-foreground">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-bold tracking-tight text-foreground">
+                    Minimum Silence Gap
+                  </label>
+                  <p className="text-[10px] text-foreground-subtle font-medium uppercase tracking-wider">
+                    Duration required to split cues
+                  </p>
+                </div>
+                <span className="glass-lighter px-3 py-1 rounded-lg font-mono font-bold text-xs text-primary border border-primary/20">
                   {localMinGap.toFixed(1)}s
                 </span>
               </div>
@@ -129,18 +135,21 @@ export function ThresholdControls() {
                 max={15.0}
                 step={0.1}
                 disabled={isSegmenting}
+                className="py-2"
               />
-              <p className="text-xs text-muted-foreground">
-                Minimum silence duration required to split cues apart. Lower = splits more aggressively (more separate cues)
-              </p>
             </div>
 
-            <div className="space-y-3">
+            <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">
-                  Minimum Cue Length
-                </label>
-                <span className="text-sm text-muted-foreground">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-bold tracking-tight text-foreground">
+                    Minimum Cue Length
+                  </label>
+                  <p className="text-[10px] text-foreground-subtle font-medium uppercase tracking-wider">
+                    Ignore cues shorter than this
+                  </p>
+                </div>
+                <span className="glass-lighter px-3 py-1 rounded-lg font-mono font-bold text-xs text-primary border border-primary/20">
                   {localMinCueLength.toFixed(1)}s
                 </span>
               </div>
@@ -151,17 +160,19 @@ export function ThresholdControls() {
                 max={15.0}
                 step={0.1}
                 disabled={isSegmenting}
+                className="py-2"
               />
-              <p className="text-xs text-muted-foreground">
-                Minimum duration for a detected cue. Shorter cues will be filtered out
-              </p>
             </div>
           </div>
         </div>
 
         {segments.length > 0 && (
-          <div className="text-sm text-center text-muted-foreground">
-            {segments.length} cue{segments.length !== 1 ? 's' : ''} detected
+          <div className="flex items-center justify-center gap-2 pt-2 animate-in fade-in duration-500">
+            <div className="h-[1px] flex-1 bg-white/5" />
+            <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-foreground-subtle">
+              {segments.length} EVENT{segments.length !== 1 ? 'S' : ''} DETECTED
+            </div>
+            <div className="h-[1px] flex-1 bg-white/5" />
           </div>
         )}
       </CardContent>

@@ -51,7 +51,7 @@ export function AddItemCombobox({
 
   return (
     <div className="relative">
-      <div className="flex gap-1">
+      <div className="flex gap-2">
         <input
           ref={inputRef}
           type="text"
@@ -67,7 +67,7 @@ export function AddItemCombobox({
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className="flex-1 px-2 py-1 text-sm border rounded bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+          className="flex-1 px-3 py-2 text-sm rounded-lg bg-white/5 border border-white/10 text-foreground placeholder:text-foreground-muted focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary"
         />
         <Button
           type="button"
@@ -75,7 +75,7 @@ export function AddItemCombobox({
           variant="outline"
           onClick={handleAdd}
           disabled={!value.trim()}
-          className="px-2 py-1 h-auto text-xs"
+          className="px-4 py-2 h-auto text-xs glass-lighter"
         >
           Add
         </Button>
@@ -83,11 +83,11 @@ export function AddItemCombobox({
 
       {/* Suggestions dropdown */}
       {showSuggestions && value && filteredSuggestions.length > 0 && (
-        <div className="absolute z-50 w-full mt-1 bg-white border rounded shadow-lg max-h-48 overflow-y-auto">
+        <div className="absolute z-50 w-full mt-1 glass rounded-lg shadow-lg max-h-48 overflow-y-auto border border-white/10">
           {filteredSuggestions.map((suggestion) => (
             <div
               key={suggestion}
-              className="px-2 py-1 text-sm cursor-pointer hover:bg-blue-50"
+              className="px-3 py-2 text-sm cursor-pointer text-foreground hover:bg-primary/20 first:rounded-t-lg last:rounded-b-lg"
               onMouseDown={(e) => {
                 e.preventDefault()  // Prevent blur
                 handleSuggestionClick(suggestion)

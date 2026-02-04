@@ -42,7 +42,7 @@ export function WaveformViewer() {
     project,
     activeCueId,
     setActiveCueId,
-    playingCueId,
+    playingCueId: _playingCueId,
     setPlayingCueId,
     startTimecode,
     framerate,
@@ -434,10 +434,20 @@ export function WaveformViewer() {
 
               // Only show context menu before analysis
               if (!project) {
+                // Calculate split time from click position
+                const ws = wavesurferRef.current
+                const rect = waveformRef.current?.getBoundingClientRect()
+                let splitTime = region.start // fallback to region start
+                if (ws && rect) {
+                  const clickX = e.clientX - rect.left
+                  const duration = ws.getDuration()
+                  splitTime = (clickX / rect.width) * duration
+                }
                 setContextMenu({
                   x: e.clientX,
                   y: e.clientY,
                   segmentIndex: actualIndex,
+                  splitTime,
                 })
               }
           } else {

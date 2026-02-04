@@ -66,10 +66,15 @@ def analyze_segments(
     rows = []  # For backwards-compatible CSV
 
     total_segments = len(segments)
+    # Use sub-steps for more granular progress (7 analysis steps per segment)
+    steps_per_segment = 7
+    total_steps = total_segments * steps_per_segment
 
-    for i, (start, end) in enumerate(segments, 1):
+    for i, (start, end) in enumerate(segments):
+        segment_num = i + 1
+        base_step = i * steps_per_segment
         if progress_callback:
-            progress_callback(i, total_segments, f"Analyzing segment {i}/{total_segments}")
+            progress_callback(base_step, total_steps, f"Analyzing segment {segment_num}/{total_segments}")
 
         # Extract segment audio
         start_sample = int(start * sr)
@@ -98,41 +103,41 @@ def analyze_segments(
             # BPM analysis
             try:
                 if progress_callback:
-                    progress_callback(i, total_segments, f"Segment {i}: Detecting BPM")
+                    progress_callback(base_step + 1, total_steps, f"Segment {segment_num}: Detecting BPM")
                 bpm = _bpm_track(music_mono, sr)
             except Exception as e:
-                print(f"[WARNING] BPM analysis failed for segment {i}: {e}")
+                print(f"[WARNING] BPM analysis failed for segment {segment_num}: {e}")
 
             # Instrument detection via YAMNet
             try:
                 if progress_callback:
-                    progress_callback(i, total_segments, f"Segment {i}: Detecting instruments")
+                    progress_callback(base_step + 2, total_steps, f"Segment {segment_num}: Detecting instruments")
                 instruments = extract_instruments(music_mono, sr=sr, top_n=15)
-                print(f"[DEBUG] Detected instruments for segment {i}: {instruments}")
+                print(f"[DEBUG] Detected instruments for segment {segment_num}: {instruments}")
             except Exception as e:
-                print(f"[WARNING] Instrument extraction failed for segment {i}: {e}")
+                print(f"[WARNING] Instrument extraction failed for segment {segment_num}: {e}")
 
             # Genre detection via YAMNet
             try:
                 if progress_callback:
-                    progress_callback(i, total_segments, f"Segment {i}: Detecting genres")
+                    progress_callback(base_step + 3, total_steps, f"Segment {segment_num}: Detecting genres")
                 genres = extract_genres(music_mono, sr=sr, top_n=10)
-                print(f"[DEBUG] Detected genres for segment {i}: {genres}")
+                print(f"[DEBUG] Detected genres for segment {segment_num}: {genres}")
             except Exception as e:
-                print(f"[WARNING] Genre extraction failed for segment {i}: {e}")
+                print(f"[WARNING] Genre extraction failed for segment {segment_num}: {e}")
 
             # Music probability
             try:
                 if progress_callback:
-                    progress_callback(i, total_segments, f"Segment {i}: Checking music probability")
+                    progress_callback(base_step + 4, total_steps, f"Segment {segment_num}: Checking music probability")
                 music_prob = music_probability(music_mono, sr)
             except Exception as e:
-                print(f"[WARNING] Music probability analysis failed for segment {i}: {e}")
+                print(f"[WARNING] Music probability analysis failed for segment {segment_num}: {e}")
 
             # CLAP tags
             try:
                 if progress_callback:
-                    progress_callback(i, total_segments, f"Segment {i}: Analyzing style")
+                    progress_callback(base_step + 5, total_steps, f"Segment {segment_num}: Analyzing style")
                 clap_categorized = tag_chunk(music_mono, sr)
 
                 # Extract top tags per category
@@ -145,23 +150,23 @@ def analyze_segments(
                 clap_top_overall = sorted(top_tags, key=lambda x: x[1], reverse=True)[:5]
 
             except Exception as e:
-                print(f"[WARNING] CLAP analysis failed for segment {i}: {e}")
+                print(f"[WARNING] CLAP analysis failed for segment {segment_num}: {e}")
 
             # Key detection
             try:
                 if progress_callback:
-                    progress_callback(i, total_segments, f"Segment {i}: Detecting key")
+                    progress_callback(base_step + 6, total_steps, f"Segment {segment_num}: Detecting key")
                 chord_analysis = analyze_chords(audio_data=music_mono, sr=sr)
                 detected_key = chord_analysis.get('key', 'Unknown')
             except Exception as e:
-                print(f"[WARNING] Key detection failed for segment {i}: {e}")
+                print(f"[WARNING] Key detection failed for segment {segment_num}: {e}")
 
             # Mood analysis (most fragile)
             try:
                 if progress_callback:
-                    progress_callback(i, total_segments, f"Segment {i}: Analyzing mood/emotion")
+                    progress_callback(base_step + 7, total_steps, f"Segment {segment_num}: Analyzing mood/emotion")
 
-                segment_path = output_dir / f"segment_{i}_temp.wav"
+                segment_path = output_dir / f"segment_{segment_num}_temp.wav"
                 sf.write(segment_path, music_mono, sr)
 
                 mood_result = global_moods(str(segment_path), threshold=thr)
