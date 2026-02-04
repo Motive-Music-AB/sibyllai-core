@@ -11,9 +11,11 @@ export function ThresholdControls() {
     musicThreshold,
     minGap,
     minCueLength,
+    silenceThreshold,
     setMusicThreshold,
     setMinGap,
     setMinCueLength,
+    setSilenceThreshold,
     setSegments,
     setIsSegmenting,
     isSegmenting,
@@ -23,6 +25,7 @@ export function ThresholdControls() {
   const [localThreshold, setLocalThreshold] = useState(musicThreshold)
   const [localMinGap, setLocalMinGap] = useState(minGap)
   const [localMinCueLength, setLocalMinCueLength] = useState(minCueLength)
+  const [localSilenceThreshold, setLocalSilenceThreshold] = useState(silenceThreshold)
   const [showSettings, setShowSettings] = useState(false)
 
   const handlePreview = useCallback(async () => {
@@ -31,6 +34,7 @@ export function ThresholdControls() {
     setMusicThreshold(localThreshold)
     setMinGap(localMinGap)
     setMinCueLength(localMinCueLength)
+    setSilenceThreshold(localSilenceThreshold)
 
     try {
       const response = await api.getSegmentPreview({
@@ -38,6 +42,7 @@ export function ThresholdControls() {
         music_thresh: localThreshold,
         min_gap: localMinGap,
         min_cue_length: localMinCueLength,
+        silence_thresh: localSilenceThreshold,
       })
       setSegments(response.segments, response.duration)
     } catch (err) {
@@ -45,7 +50,7 @@ export function ThresholdControls() {
     } finally {
       setIsSegmenting(false)
     }
-  }, [fileId, localThreshold, localMinGap, localMinCueLength, setSegments, setIsSegmenting, setMusicThreshold, setMinGap, setMinCueLength])
+  }, [fileId, localThreshold, localMinGap, localMinCueLength, localSilenceThreshold, setSegments, setIsSegmenting, setMusicThreshold, setMinGap, setMinCueLength, setSilenceThreshold])
 
   if (!fileId) return null
 
@@ -159,6 +164,31 @@ export function ThresholdControls() {
                 min={0.5}
                 max={15.0}
                 step={0.1}
+                disabled={isSegmenting}
+                className="py-2"
+              />
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-bold tracking-tight text-foreground">
+                    Silence Threshold
+                  </label>
+                  <p className="text-[10px] text-foreground-subtle font-medium uppercase tracking-wider">
+                    Amplitude level to trim silence
+                  </p>
+                </div>
+                <span className="glass-lighter px-3 py-1 rounded-lg font-mono font-bold text-xs text-primary border border-primary/20">
+                  {localSilenceThreshold < 0.001 ? localSilenceThreshold.toFixed(4) : localSilenceThreshold.toFixed(3)}
+                </span>
+              </div>
+              <Slider
+                value={[localSilenceThreshold]}
+                onValueChange={([value]) => setLocalSilenceThreshold(value)}
+                min={0.001}
+                max={0.1}
+                step={0.001}
                 disabled={isSegmenting}
                 className="py-2"
               />

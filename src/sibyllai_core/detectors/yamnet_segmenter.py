@@ -18,7 +18,7 @@ def extract_audio(input_path, output_path):
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return output_path
 
-def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0):
+def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0, silence_thresh=0.01):
     """
     Returns a list of (start_time, end_time) tuples for detected music regions in the audio file.
     """
@@ -82,6 +82,32 @@ def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0):
     # Extend each segment by 0.5s at start and end to capture missed audio
     PADDING = 0.5
     music_segments = [(max(0, start - PADDING), end + PADDING) for start, end in music_segments]
+
+    # Trim silence from segment starts using amplitude threshold
+    # This prevents segments starting at 0 when there's actual silence
+    def trim_silence_start(waveform, sr, start, end, amp_thresh, hop_size=0.05):
+        """Trim silence from the start of a segment based on RMS amplitude."""
+        start_sample = int(start * sr)
+        end_sample = int(end * sr)
+        hop_samples = int(hop_size * sr)
+
+        # Check amplitude in small windows from segment start
+        for i in range(start_sample, min(end_sample, start_sample + int(2 * sr)), hop_samples):
+            window = waveform[i:i + hop_samples]
+            if len(window) > 0:
+                rms = np.sqrt(np.mean(window ** 2))
+                if rms > amp_thresh:
+                    # Found audio - return this position
+                    return i / sr
+        # No significant audio found in first 2 seconds, return original start
+        return start
+
+    # Apply silence trimming to each segment
+    trimmed_segments = []
+    for start, end in music_segments:
+        trimmed_start = trim_silence_start(waveform, 16000, start, end, silence_thresh)
+        trimmed_segments.append((trimmed_start, end))
+    music_segments = trimmed_segments
 
     # Clean up temp file if created
     if wav_path == temp_wav and os.path.exists(temp_wav):

@@ -57,6 +57,7 @@ class SegmentPreviewRequest(BaseModel):
     music_thresh: float = 0.2
     min_gap: float = 5.0
     min_cue_length: float = 3.0
+    silence_thresh: float = 0.01
 
 
 class SegmentPreviewResponse(BaseModel):
@@ -194,7 +195,8 @@ async def segment_preview(request: SegmentPreviewRequest):
             audio_path=file_path,
             music_thresh=request.music_thresh,
             min_gap=request.min_gap,
-            min_cue_length=request.min_cue_length
+            min_cue_length=request.min_cue_length,
+            silence_thresh=request.silence_thresh
         )
 
         return SegmentPreviewResponse(

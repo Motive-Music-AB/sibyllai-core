@@ -11,6 +11,7 @@ export interface SegmentPreviewRequest {
   music_thresh: number
   min_gap: number
   min_cue_length: number
+  silence_thresh: number
 }
 
 export interface SegmentPreviewResponse {

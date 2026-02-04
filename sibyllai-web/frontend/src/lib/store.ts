@@ -21,6 +21,7 @@ interface AppState {
   musicThreshold: number
   minGap: number
   minCueLength: number
+  silenceThreshold: number
   isSegmenting: boolean
 
   // Analysis state (Phase 2)
@@ -49,6 +50,7 @@ interface AppState {
   setMusicThreshold: (threshold: number) => void
   setMinGap: (gap: number) => void
   setMinCueLength: (length: number) => void
+  setSilenceThreshold: (threshold: number) => void
   setIsSegmenting: (isSegmenting: boolean) => void
   setIsAnalyzing: (isAnalyzing: boolean) => void
   setAnalysisProgress: (progress: number, status: string) => void
@@ -74,6 +76,7 @@ const initialState = {
   musicThreshold: 0.01,
   minGap: 3.0,
   minCueLength: 3.0,
+  silenceThreshold: 0.01,
   isSegmenting: false,
   isAnalyzing: false,
   analysisProgress: 0,
@@ -194,6 +197,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   setMinCueLength: (length) =>
     set({ minCueLength: length }),
+
+  setSilenceThreshold: (threshold) =>
+    set({ silenceThreshold: threshold }),
 
   setIsSegmenting: (isSegmenting) =>
     set({ isSegmenting }),
