@@ -38,6 +38,7 @@ export function WaveformViewer() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isReady, setIsReady] = useState(false)
   const [zoom, setZoom] = useState(0)
+  const [isZooming, setIsZooming] = useState(false)
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
   const [ticks, setTicks] = useState<Array<{ position: number; timecode: string; isMajor: boolean }>>([])
   const [waveformWidth, setWaveformWidth] = useState(0)
@@ -518,10 +519,11 @@ export function WaveformViewer() {
             // Calculate pixel positions relative to waveform container
             const duration = wavesurferRef.current?.getDuration() || 1
 
-            // Get current width dynamically based on zoom
+            // Get current width dynamically based on zoom (use ref to avoid dependency)
             let containerWidth: number
-            if (zoom > 0) {
-              containerWidth = duration * zoom
+            const currentZoom = zoomRef.current
+            if (currentZoom > 0) {
+              containerWidth = duration * currentZoom
             } else {
               const wrapper = wavesurferRef.current?.getWrapper()
               containerWidth = wrapper?.scrollWidth || wrapper?.clientWidth || 1
@@ -602,7 +604,8 @@ export function WaveformViewer() {
         regionsRef.current.on('region-created', handleRegionCreated)
       }, (segmentsToRender.length + 1) * 10) // Wait for all regions to be added
     }
-  }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, zoom, addSegment, isSegmentSelected, findCueForSegment, handleSegmentClick])
+  // Note: zoom removed from deps - we use zoomRef.current inside handlers to avoid recreating regions on zoom
+  }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, addSegment, isSegmentSelected, findCueForSegment, handleSegmentClick])
 
   // Track mouse position during dragging
   useEffect(() => {
@@ -629,8 +632,9 @@ export function WaveformViewer() {
   }
 
   const handleZoomIn = () => {
-    if (!wavesurferRef.current) return
+    if (!wavesurferRef.current || isZooming) return
 
+    setIsZooming(true)
     const ws = wavesurferRef.current
     const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
@@ -724,14 +728,16 @@ export function WaveformViewer() {
             console.log('DEBUG ZOOM IN - after setting, scrollLeft is now:', newWrapper.scrollLeft)
             pendingScrollRef.current = null
           }
+          setIsZooming(false)
         })
       })
     })
   }
 
   const handleZoomOut = () => {
-    if (!wavesurferRef.current) return
+    if (!wavesurferRef.current || isZooming) return
 
+    setIsZooming(true)
     const ws = wavesurferRef.current
     const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
@@ -761,6 +767,7 @@ export function WaveformViewer() {
     // If already at fit/min zoom, don't do anything
     if (zoom === 0 || newZoom >= effectiveZoom) {
       console.log('Already at minimum zoom, skipping')
+      setIsZooming(false)
       return
     }
 
@@ -821,12 +828,16 @@ export function WaveformViewer() {
             console.log('DEBUG ZOOM OUT - after setting, scrollLeft is now:', newWrapper.scrollLeft)
             pendingScrollRef.current = null
           }
+          setIsZooming(false)
         })
       })
     })
   }
 
   const handleZoomReset = () => {
+    if (isZooming) return
+
+    setIsZooming(true)
     console.log('Zoom Reset - current:', zoom, 'resetting to 0')
 
     // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
@@ -838,6 +849,13 @@ export function WaveformViewer() {
 
     // Update width and ticks immediately (for zoom=0, reads from DOM which is stable)
     updateWidthAndTicks()
+
+    // Clear zooming state after a short delay
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setIsZooming(false)
+      })
+    })
   }
 
   if (!fileId) {
@@ -848,7 +866,16 @@ export function WaveformViewer() {
     <Card className="w-full border-white/10 shadow-none">
       <CardContent className="pt-6">
         <div className="space-y-4">
-          <div className="overflow-x-auto rounded-lg bg-[rgba(30,20,15,0.6)]">
+          <div className="overflow-x-auto rounded-lg bg-[rgba(30,20,15,0.6)] relative">
+            {/* Zoom loading overlay */}
+            {isZooming && (
+              <div className="absolute inset-0 bg-background/50 backdrop-blur-sm z-20 flex items-center justify-center">
+                <div className="flex items-center gap-2 text-foreground-muted text-sm">
+                  <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                  Zooming...
+                </div>
+              </div>
+            )}
             {/* Wrapper that contains both ruler and waveform - scrolls as one unit */}
             <div
               style={{
@@ -962,18 +989,18 @@ export function WaveformViewer() {
                   variant="outline"
                   size="sm"
                   onClick={handleZoomOut}
-                  disabled={zoom === ZOOM_LEVELS[0]}
+                  disabled={zoom === ZOOM_LEVELS[0] || isZooming}
                 >
                   Zoom Out
                 </Button>
                 <span className="text-sm text-muted-foreground min-w-16 text-center">
-                  {zoom === 0 ? 'Fit' : `${zoom.toFixed(0)}x`}
+                  {isZooming ? '...' : zoom === 0 ? 'Fit' : `${zoom.toFixed(0)}x`}
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={handleZoomIn}
-                  disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
+                  disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1] || isZooming}
                 >
                   Zoom In
                 </Button>
@@ -981,7 +1008,7 @@ export function WaveformViewer() {
                   variant="outline"
                   size="sm"
                   onClick={handleZoomReset}
-                  disabled={zoom === 0}
+                  disabled={zoom === 0 || isZooming}
                 >
                   Reset
                 </Button>
