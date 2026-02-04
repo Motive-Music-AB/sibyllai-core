@@ -157,57 +157,17 @@ export function WaveformViewer() {
     // Regenerate ticks with current zoom level from ref (synchronous, not React state)
     const newTicks = generateTicks(duration, currentZoom, framerate, startTimecode)
 
-    console.log('Update width - width:', calculatedWidth, 'zoomRef:', currentZoom, 'zoomState:', zoom, 'ticks:', newTicks.length)
-
     // Update both width and ticks atomically
     setWaveformWidth(calculatedWidth)
     setTicks(newTicks)
   }, [zoom, framerate, startTimecode])
 
-  // Sync width and ticks on WaveSurfer redraw events
+  // Set initial width and ticks when ready
+  // Note: We no longer listen to redraw events - they fire too frequently and cause
+  // performance issues. Width/ticks are only updated on zoom changes (handled by zoom functions).
   useEffect(() => {
     if (!wavesurferRef.current || !isReady || !waveformRef.current) return
-
-    let previousZoom = zoomRef.current
-    let isZoomChanging = false
-
-    const handleRedraw = () => {
-      const ws = wavesurferRef.current
-      if (!ws) return
-
-      const currentZoom = zoomRef.current
-      const zoomChanged = currentZoom !== previousZoom
-
-      // When zoom changes, skip the immediate redraw event
-      // The zoom handlers will manually trigger updateWidthAndTicks after delay
-      if (zoomChanged) {
-        previousZoom = currentZoom
-        isZoomChanging = true
-
-        // Reset flag after a delay to prevent redraw events from overriding calculated width
-        // Use longer delay for zoom out (DOM takes longer to update)
-        setTimeout(() => {
-          isZoomChanging = false
-        }, 200)
-
-        // Skip this redraw - zoom handlers will handle it
-        return
-      }
-
-      // No zoom change - update width and ticks
-      // Always use updateWidthAndTicks which calculates from duration for non-zero zoom
-      if (!isZoomChanging) {
-        updateWidthAndTicks()
-      }
-    }
-
-    // Set initial width and ticks
     updateWidthAndTicks()
-
-    wavesurferRef.current.on('redraw', handleRedraw)
-    return () => {
-      wavesurferRef.current?.un('redraw', handleRedraw)
-    }
   }, [isReady, framerate, startTimecode, updateWidthAndTicks])
 
   // Helper to check if segment is selected
@@ -659,8 +619,6 @@ export function WaveformViewer() {
     const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
     const centerTime = (viewportCenterPx / currentWidth) * duration
 
-    console.log('Zoom In:', { effectiveZoom, newZoom })
-
     zoomRef.current = newZoom
     ws.zoom(newZoom)
     setZoom(newZoom)
@@ -720,8 +678,6 @@ export function WaveformViewer() {
     const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
     const centerTime = (viewportCenterPx / currentWidth) * duration
 
-    console.log('Zoom Out:', { effectiveZoom, newZoom })
-
     zoomRef.current = newZoom
     ws.zoom(newZoom)
     setZoom(newZoom)
@@ -775,7 +731,10 @@ export function WaveformViewer() {
     <Card className="w-full border-white/10 shadow-none">
       <CardContent className="pt-6">
         <div className="space-y-4">
-          <div className="overflow-x-auto rounded-lg bg-[rgba(30,20,15,0.6)] relative">
+          <div
+            className="overflow-x-auto rounded-lg bg-[rgba(30,20,15,0.6)] relative"
+            style={{ willChange: 'scroll-position', transform: 'translateZ(0)' }}
+          >
             {/* Zoom loading overlay */}
             {isZooming && (
               <div className="absolute inset-0 bg-background/50 backdrop-blur-sm z-20 flex items-center justify-center">
