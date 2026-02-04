@@ -5,11 +5,13 @@ import { ThresholdControls } from '@/components/ThresholdControls'
 import { AnalyzeButton } from '@/components/AnalyzeButton'
 import { CueCard } from '@/components/CueCard'
 import { DebugConsole } from '@/components/DebugConsole'
+import { CueSynch } from '@/components/CueSynch'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
+import { exportProjectToCSV } from '@/lib/csv-export'
 
 function App() {
-  const { fileId, project, showControls, setShowControls, resetToSegmentation, reset } = useAppStore()
+  const { fileId, project, showControls, setShowControls, resetToSegmentation, reset, currentPage, setCurrentPage } = useAppStore()
 
   return (
     <div className="min-h-screen bg-background p-8">
@@ -17,7 +19,7 @@ function App() {
       <DebugConsole />
       <div className="max-w-[1800px] mx-auto space-y-8">
         {/* Header */}
-        <header className="space-y-2">
+        <header className="space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex-1" />
             <div className="text-center">
@@ -27,20 +29,48 @@ function App() {
               </p>
             </div>
             <div className="flex-1 flex justify-end">
-              {fileId && (
+              {currentPage === 'analysis' && fileId && (
                 <Button variant="outline" size="sm" onClick={reset}>
                   New Import
                 </Button>
               )}
             </div>
           </div>
+          {/* Navigation Tabs */}
+          <div className="flex justify-center">
+            <div className="inline-flex bg-muted rounded-lg p-1 border">
+              <button
+                onClick={() => setCurrentPage('analysis')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  currentPage === 'analysis'
+                    ? 'bg-background shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                Analysis
+              </button>
+              <button
+                onClick={() => setCurrentPage('cuesynch')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  currentPage === 'cuesynch'
+                    ? 'bg-background shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                CueSynch
+              </button>
+            </div>
+          </div>
         </header>
 
-        {/* Upload Section */}
-        {!fileId && <FileUpload />}
+        {/* Analysis Page */}
+        {currentPage === 'analysis' && (
+          <>
+            {/* Upload Section */}
+            {!fileId && <FileUpload />}
 
-        {/* Main Analysis View - Always show waveform when file is loaded */}
-        {fileId && (
+            {/* Main Analysis View - Always show waveform when file is loaded */}
+            {fileId && (
           <div className="space-y-6">
             {/* Selection Controls - Above Waveform */}
             <SelectionControls />
@@ -67,6 +97,13 @@ function App() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => exportProjectToCSV(project)}
+                    >
+                      Export CSV
+                    </Button>
                     <Button
                       variant="outline"
                       size="sm"
@@ -101,7 +138,12 @@ function App() {
               </div>
             )}
           </div>
+            )}
+          </>
         )}
+
+        {/* CueSynch Page */}
+        {currentPage === 'cuesynch' && <CueSynch />}
       </div>
     </div>
   )

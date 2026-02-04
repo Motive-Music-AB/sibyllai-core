@@ -1,7 +1,12 @@
 import { create } from 'zustand'
 import type { SibylProject, CuratedAttributes } from './types'
 
+type Page = 'analysis' | 'cuesynch'
+
 interface AppState {
+  // Navigation state
+  currentPage: Page
+
   // Upload state
   uploadedFile: File | null
   fileId: string | null
@@ -31,6 +36,7 @@ interface AppState {
   showControls: boolean
 
   // Actions
+  setCurrentPage: (page: Page) => void
   setUploadedFile: (file: File, fileId: string, fileName: string, startTimecode: string, framerate: number) => void
   setStartTimecode: (tc: string) => void
   setFramerate: (fps: number) => void
@@ -56,6 +62,7 @@ interface AppState {
 }
 
 const initialState = {
+  currentPage: 'analysis' as Page,
   uploadedFile: null,
   fileId: null,
   fileName: null,
@@ -80,6 +87,9 @@ const initialState = {
 
 export const useAppStore = create<AppState>((set) => ({
   ...initialState,
+
+  setCurrentPage: (page) =>
+    set({ currentPage: page }),
 
   setUploadedFile: (file, fileId, fileName, startTimecode, framerate) =>
     set({ uploadedFile: file, fileId, fileName, startTimecode, framerate }),
