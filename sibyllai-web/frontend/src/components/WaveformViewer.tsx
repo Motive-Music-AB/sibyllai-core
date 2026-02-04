@@ -25,7 +25,8 @@ import { generateTicks, secondsToTimecode } from '@/lib/timecode'
  *
  * DO NOT SIMPLIFY THIS LOGIC - it took weeks to debug!
  */
-const ZOOM_LEVELS = [0, 10, 25, 50, 100, 200, 400, 800]
+// Reduced max zoom to prevent slow renders. 200 px/sec gives 8+ pixels per frame at 24fps.
+const ZOOM_LEVELS = [0, 10, 25, 50, 100, 200]
 
 export function WaveformViewer() {
   const waveformRef = useRef<HTMLDivElement>(null)
@@ -641,17 +642,11 @@ export function WaveformViewer() {
     const viewportWidth = wrapper.clientWidth
     const currentScrollLeft = wrapper.scrollLeft
 
-    // Calculate the center point of the current viewport in time
-    // This works whether audio is playing or not
-    const currentWidth = zoom === 0 ? viewportWidth : duration * zoom
-    const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
-    const centerTime = (viewportCenterPx / currentWidth) * duration
-
-    // Calculate effective zoom level (pixels per second) when in fit mode
+    // Calculate effective zoom level
     const effectiveZoom = zoom === 0 ? viewportWidth / duration : zoom
 
-    // Find the next zoom level that's actually higher than current effective zoom
-    let newZoom = ZOOM_LEVELS[ZOOM_LEVELS.length - 1] // default to max
+    // Find the next zoom level
+    let newZoom = ZOOM_LEVELS[ZOOM_LEVELS.length - 1]
     for (const level of ZOOM_LEVELS) {
       if (level > effectiveZoom) {
         newZoom = level
@@ -659,73 +654,31 @@ export function WaveformViewer() {
       }
     }
 
-    console.log('Zoom In - effectiveZoom:', effectiveZoom, 'newZoom:', newZoom)
+    // Calculate center time for scroll preservation
+    const currentWidth = zoom === 0 ? viewportWidth : duration * zoom
+    const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
+    const centerTime = (viewportCenterPx / currentWidth) * duration
 
-    // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
+    console.log('Zoom In:', { effectiveZoom, newZoom })
+
     zoomRef.current = newZoom
-    console.log('DEBUG ZOOM IN - BEFORE ws.zoom(), wrapper dimensions:', {
-      scrollWidth: wrapper.scrollWidth,
-      clientWidth: wrapper.clientWidth,
-      scrollLeft: wrapper.scrollLeft
-    })
     ws.zoom(newZoom)
-    console.log('DEBUG ZOOM IN - AFTER ws.zoom(), wrapper dimensions:', {
-      scrollWidth: wrapper.scrollWidth,
-      clientWidth: wrapper.clientWidth,
-      scrollLeft: wrapper.scrollLeft
-    })
     setZoom(newZoom)
 
-    // Calculate scroll position immediately (before ws.zoom triggers redraw)
-    // Calculate expected width from zoom level
-    const expectedWidth = newZoom === 0 ? wrapper.clientWidth : duration * newZoom
-
-    // Calculate where the center point is in pixels at the new zoom level
+    // Calculate scroll position
+    const expectedWidth = newZoom === 0 ? viewportWidth : duration * newZoom
     const centerPx = (centerTime / duration) * expectedWidth
-
-    // Calculate target scroll position (keep center centered)
     let targetScrollLeft = centerPx - (viewportWidth / 2)
-
-    // Smart positioning: avoid showing too much empty space at edges
-    const maxScrollLeft = expectedWidth - viewportWidth
-
-    console.log('DEBUG ZOOM IN - scroll calc:', {
-      expectedWidth,
-      centerPx,
-      viewportWidth,
-      targetScrollLeft,
-      maxScrollLeft
-    })
-
-    // If playhead near start, don't scroll past beginning
-    if (targetScrollLeft < 0) {
-      targetScrollLeft = 0
-    }
-    // If playhead near end, don't show empty space beyond waveform
-    else if (targetScrollLeft > maxScrollLeft) {
-      targetScrollLeft = Math.max(0, maxScrollLeft)
-    }
-
-    console.log('DEBUG ZOOM IN - storing pending scroll:', targetScrollLeft)
-    // Store the target scroll position to be applied after redraw
+    targetScrollLeft = Math.max(0, Math.min(targetScrollLeft, expectedWidth - viewportWidth))
     pendingScrollRef.current = targetScrollLeft
 
-    // Update width and ticks immediately (calculation-based, no DOM read needed)
     updateWidthAndTicks()
 
-    // Apply scroll after multiple animation frames to ensure DOM is fully updated
-    // First frame: zoom is applied
     requestAnimationFrame(() => {
-      // Second frame: redraw has happened
       requestAnimationFrame(() => {
-        // Third frame: all layout calculations complete
         requestAnimationFrame(() => {
           if (pendingScrollRef.current !== null) {
-            const newWrapper = ws.getWrapper()
-            console.log('DEBUG ZOOM IN - applying scroll after RAF:', pendingScrollRef.current)
-            console.log('DEBUG ZOOM IN - wrapper scrollWidth:', newWrapper.scrollWidth, 'clientWidth:', newWrapper.clientWidth)
-            newWrapper.scrollLeft = pendingScrollRef.current
-            console.log('DEBUG ZOOM IN - after setting, scrollLeft is now:', newWrapper.scrollLeft)
+            ws.getWrapper().scrollLeft = pendingScrollRef.current
             pendingScrollRef.current = null
           }
           setIsZooming(false)
@@ -737,24 +690,17 @@ export function WaveformViewer() {
   const handleZoomOut = () => {
     if (!wavesurferRef.current || isZooming) return
 
-    setIsZooming(true)
     const ws = wavesurferRef.current
     const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
     const viewportWidth = wrapper.clientWidth
     const currentScrollLeft = wrapper.scrollLeft
 
-    // Calculate the center point of the current viewport in time
-    // This works whether audio is playing or not
-    const currentWidth = zoom === 0 ? viewportWidth : duration * zoom
-    const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
-    const centerTime = (viewportCenterPx / currentWidth) * duration
-
-    // Calculate effective zoom level (pixels per second)
+    // Calculate effective zoom level
     const effectiveZoom = zoom === 0 ? viewportWidth / duration : zoom
 
-    // Find the next zoom level that's lower than current effective zoom
-    let newZoom = 0 // default to fit
+    // Find the next zoom level that's lower
+    let newZoom = 0
     for (let i = ZOOM_LEVELS.length - 1; i >= 0; i--) {
       if (ZOOM_LEVELS[i] < effectiveZoom) {
         newZoom = ZOOM_LEVELS[i]
@@ -762,70 +708,37 @@ export function WaveformViewer() {
       }
     }
 
-    console.log('Zoom Out - effectiveZoom:', effectiveZoom, 'newZoom:', newZoom)
-
     // If already at fit/min zoom, don't do anything
     if (zoom === 0 || newZoom >= effectiveZoom) {
-      console.log('Already at minimum zoom, skipping')
-      setIsZooming(false)
       return
     }
 
-    // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
+    setIsZooming(true)
+
+    // Calculate center time for scroll preservation
+    const currentWidth = zoom === 0 ? viewportWidth : duration * zoom
+    const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
+    const centerTime = (viewportCenterPx / currentWidth) * duration
+
+    console.log('Zoom Out:', { effectiveZoom, newZoom })
+
     zoomRef.current = newZoom
     ws.zoom(newZoom)
     setZoom(newZoom)
 
-    // Calculate scroll position immediately (before ws.zoom triggers redraw)
-    // Calculate expected width from zoom level
-    const expectedWidth = newZoom === 0 ? wrapper.clientWidth : duration * newZoom
-
-    // Calculate where the center point is in pixels at the new zoom level
+    const expectedWidth = newZoom === 0 ? viewportWidth : duration * newZoom
     const centerPx = (centerTime / duration) * expectedWidth
-
-    // Calculate target scroll position (keep center centered)
     let targetScrollLeft = centerPx - (viewportWidth / 2)
-
-    // Smart positioning: avoid showing too much empty space at edges
-    const maxScrollLeft = expectedWidth - viewportWidth
-
-    console.log('DEBUG ZOOM OUT - scroll calc:', {
-      expectedWidth,
-      centerPx,
-      viewportWidth,
-      targetScrollLeft,
-      maxScrollLeft
-    })
-
-    // If center near start, don't scroll past beginning
-    if (targetScrollLeft < 0) {
-      targetScrollLeft = 0
-    }
-    // If center near end, don't show empty space beyond waveform
-    else if (targetScrollLeft > maxScrollLeft) {
-      targetScrollLeft = Math.max(0, maxScrollLeft)
-    }
-
-    console.log('DEBUG ZOOM OUT - storing pending scroll:', targetScrollLeft)
-    // Store the target scroll position to be applied after redraw
+    targetScrollLeft = Math.max(0, Math.min(targetScrollLeft, expectedWidth - viewportWidth))
     pendingScrollRef.current = targetScrollLeft
 
-    // Update width and ticks immediately (calculation-based, no DOM read needed)
     updateWidthAndTicks()
 
-    // Apply scroll after multiple animation frames to ensure DOM is fully updated
-    // First frame: zoom is applied
     requestAnimationFrame(() => {
-      // Second frame: redraw has happened
       requestAnimationFrame(() => {
-        // Third frame: all layout calculations complete
         requestAnimationFrame(() => {
           if (pendingScrollRef.current !== null) {
-            const newWrapper = ws.getWrapper()
-            console.log('DEBUG ZOOM OUT - applying scroll after RAF:', pendingScrollRef.current)
-            console.log('DEBUG ZOOM OUT - wrapper scrollWidth:', newWrapper.scrollWidth, 'clientWidth:', newWrapper.clientWidth)
-            newWrapper.scrollLeft = pendingScrollRef.current
-            console.log('DEBUG ZOOM OUT - after setting, scrollLeft is now:', newWrapper.scrollLeft)
+            ws.getWrapper().scrollLeft = pendingScrollRef.current
             pendingScrollRef.current = null
           }
           setIsZooming(false)
@@ -838,19 +751,15 @@ export function WaveformViewer() {
     if (isZooming) return
 
     setIsZooming(true)
-    console.log('Zoom Reset - current:', zoom, 'resetting to 0')
-
-    // Update zoom ref synchronously BEFORE calling ws.zoom() (which fires redraw event)
     zoomRef.current = 0
     setZoom(0)
+
     if (wavesurferRef.current) {
       wavesurferRef.current.zoom(0)
     }
 
-    // Update width and ticks immediately (for zoom=0, reads from DOM which is stable)
     updateWidthAndTicks()
 
-    // Clear zooming state after a short delay
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         setIsZooming(false)
