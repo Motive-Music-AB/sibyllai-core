@@ -25,7 +25,7 @@ import { generateTicks, secondsToTimecode } from '@/lib/timecode'
  *
  * DO NOT SIMPLIFY THIS LOGIC - it took weeks to debug!
  */
-const ZOOM_LEVELS = [0, 10, 25, 50, 100]
+const ZOOM_LEVELS = [0, 10, 25, 50, 100, 200, 400, 800]
 
 export function WaveformViewer() {
   const waveformRef = useRef<HTMLDivElement>(null)
@@ -533,13 +533,18 @@ export function WaveformViewer() {
             // Detect which handle is being actively dragged
             let activeHandle: 'start' | 'end' | 'both' = 'both'
             if (dragStart) {
-              const startChanged = Math.abs(region.start - dragStart.start) > 0.01
-              const endChanged = Math.abs(region.end - dragStart.end) > 0.01
+              const startDelta = Math.abs(region.start - dragStart.start)
+              const endDelta = Math.abs(region.end - dragStart.end)
+              const threshold = 0.001 // More sensitive threshold
 
-              if (startChanged && !endChanged) {
+              // Determine handle based on which changed more significantly
+              if (startDelta > threshold && endDelta <= threshold) {
                 activeHandle = 'start'
-              } else if (endChanged && !startChanged) {
+              } else if (endDelta > threshold && startDelta <= threshold) {
                 activeHandle = 'end'
+              } else if (startDelta > threshold && endDelta > threshold) {
+                // Both changed - pick the one that changed more (likely floating point noise on the other)
+                activeHandle = startDelta > endDelta ? 'start' : 'end'
               }
             }
 
@@ -899,7 +904,11 @@ export function WaveformViewer() {
                           />
                           {/* Timecode label (only on major ticks) */}
                           {tick.isMajor && (
-                            <div className="absolute top-3 -translate-x-1/2 text-xs text-foreground/60 whitespace-nowrap">
+                            <div
+                              className={`absolute top-3 text-xs text-foreground/60 whitespace-nowrap ${
+                                index === 0 ? '' : '-translate-x-1/2'
+                              }`}
+                            >
                               {tick.timecode}
                             </div>
                           )}
