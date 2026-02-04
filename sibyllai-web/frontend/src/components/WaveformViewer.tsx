@@ -1012,7 +1012,7 @@ export function WaveformViewer() {
               />
 
               <div
-                className="fixed bg-white border border-gray-300 rounded-md shadow-lg py-1 z-50"
+                className="fixed glass border border-white/10 rounded-lg shadow-2xl py-1 z-50"
                 style={{
                   left: `${contextMenu.x}px`,
                   top: `${contextMenu.y}px`,
@@ -1020,17 +1020,17 @@ export function WaveformViewer() {
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+                  className="w-full px-4 py-2.5 text-left text-sm text-foreground hover:bg-white/10 flex items-center gap-3 transition-colors"
                   onClick={() => handleSplitAtMouse(contextMenu.segmentIndex, contextMenu.splitTime)}
                 >
-                  <span>✂️</span>
+                  <span className="text-primary">✂</span>
                   <span>Split cue</span>
                 </button>
                 <button
-                  className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2 text-red-600"
+                  className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-white/10 flex items-center gap-3 transition-colors"
                   onClick={() => handleDeleteCue(contextMenu.segmentIndex, contextMenu.x, contextMenu.y)}
                 >
-                  <span>🗑️</span>
+                  <span>🗑</span>
                   <span>Delete cue</span>
                 </button>
               </div>
@@ -1048,7 +1048,7 @@ export function WaveformViewer() {
 
               {/* Tooltip */}
               <div
-                className="fixed bg-white border border-gray-300 rounded-lg shadow-xl p-4 z-50"
+                className="fixed glass border border-white/10 rounded-lg shadow-2xl p-4 z-50"
                 style={{
                   left: `${deleteConfirm.x}px`,
                   top: `${deleteConfirm.y}px`,
@@ -1057,16 +1057,16 @@ export function WaveformViewer() {
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <p className="text-sm mb-3">Delete this cue?</p>
+                <p className="text-sm text-foreground mb-3">Delete this cue?</p>
                 <div className="flex gap-2">
                   <button
-                    className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded"
+                    className="px-3 py-1.5 text-sm bg-white/10 hover:bg-white/20 text-foreground rounded transition-colors"
                     onClick={() => setDeleteConfirm(null)}
                   >
                     Cancel
                   </button>
                   <button
-                    className="px-3 py-1.5 text-sm bg-red-600 hover:bg-red-700 text-white rounded"
+                    className="px-3 py-1.5 text-sm bg-red-500/80 hover:bg-red-500 text-white rounded transition-colors"
                     onClick={() => {
                       deleteSegment(deleteConfirm.index)
                       setDeleteConfirm(null)
