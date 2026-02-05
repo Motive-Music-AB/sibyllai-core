@@ -19,6 +19,7 @@ export function WaveformViewer() {
   const zoomRef = useRef(0) // Synchronous zoom tracking for redraw event handler
   const pendingScrollRef = useRef<number | null>(null) // Track pending scroll position after zoom
   const lastDragUpdateRef = useRef(0) // Throttle drag updates to 30fps
+  const lastTimecodeUpdateRef = useRef(0) // Throttle timecode updates during playback
   const peaksOptimizedRef = useRef(false) // Prevent repeated peak optimization per file
   const isZoomingRef = useRef(false) // Synchronous zoom guard to prevent race conditions
 
@@ -131,6 +132,10 @@ export function WaveformViewer() {
     ws.on('pause', () => setIsPlaying(false))
 
     ws.on('audioprocess', (currentTime) => {
+      // Throttle timecode updates to 20fps (50ms) during playback to reduce re-renders
+      const now = Date.now()
+      if (now - lastTimecodeUpdateRef.current < 50) return
+      lastTimecodeUpdateRef.current = now
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
     })
 
@@ -906,11 +911,11 @@ export function WaveformViewer() {
                   {[0, 1, 2, 3, 4].map((i) => (
                     <div
                       key={i}
-                      className="w-[3px] bg-primary rounded-sm transition-all duration-75"
+                      className="w-[3px] bg-primary rounded-sm"
                       style={{
                         height: isPlaying ? undefined : '4px',
-                        animation: isPlaying ? `soundbar 0.4s ease-in-out infinite` : 'none',
-                        animationDelay: isPlaying ? `${i * 0.08}s` : '0s',
+                        // Use full animation shorthand to avoid React style conflict warning
+                        animation: isPlaying ? `soundbar 0.4s ease-in-out ${i * 0.08}s infinite` : 'none',
                       }}
                     />
                   ))}
