@@ -7,25 +7,7 @@ import { useAppStore } from '@/lib/store'
 import { generateTicks, secondsToTimecode } from '@/lib/timecode'
 import type { Cue } from '@/lib/types'
 
-// Define zoom levels for smoother progression
-/**
- * ZOOM LEVELS - pixels per second
- *
- * CRITICAL: WaveSurfer zoom works in pixels-per-second, NOT percentage.
- * - zoom=0 means "fit to container" (auto-calculated px/sec)
- * - zoom=N means N pixels per second
- *
- * THE BUG THAT KEPT BREAKING ZOOM:
- * When at zoom=0 (fit mode), the effective px/sec depends on audio duration
- * and container width. For example:
- *   - 20 second clip in 1000px container = 50 px/sec effective
- *   - If you naively go to zoom=10, you're ZOOMING OUT (10 < 50)!
- *
- * THE FIX: Always calculate effectiveZoom = viewportWidth / duration when
- * at zoom=0, then find a level that's actually > or < that value.
- *
- * DO NOT SIMPLIFY THIS LOGIC - it took weeks to debug!
- */
+// Zoom levels are pixels-per-second; zoom=0 means "fit to container".
 // Reduced max zoom to prevent slow renders. 200 px/sec gives 8+ pixels per frame at 24fps.
 const ZOOM_LEVELS = [0, 10, 25, 50, 100, 200]
 
@@ -673,8 +655,6 @@ export function WaveformViewer() {
 
     updateWidthAndTicks()
 
-    // Single RAF is sufficient - triple nesting added 50ms+ delay
-    // Defer zoom(0) to the next frame so the container width is correct.
     requestAnimationFrame(() => {
       if (pendingScrollRef.current !== null) {
         ws.setScroll(pendingScrollRef.current)
@@ -711,9 +691,7 @@ export function WaveformViewer() {
 
     setIsZooming(true)
 
-    // IMPORTANT: When returning to fit mode, we must defer zoom(0) until after
-    // React applies the fit layout. Otherwise WaveSurfer re-renders using the
-    // previous zoomed width and leaves extra scrollable space.
+    // Defer zoom(0) until after layout so WaveSurfer uses the correct width.
     if (newZoom === 0) {
       zoomRef.current = 0
       setZoom(0)
@@ -746,8 +724,6 @@ export function WaveformViewer() {
 
     updateWidthAndTicks()
 
-    // Single RAF is sufficient - triple nesting added 50ms+ delay
-    // Defer zoom(0) to the next frame so the container width is correct.
     requestAnimationFrame(() => {
       if (pendingScrollRef.current !== null) {
         ws.setScroll(pendingScrollRef.current)
