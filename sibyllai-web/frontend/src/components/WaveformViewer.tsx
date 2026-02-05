@@ -172,7 +172,6 @@ export function WaveformViewer() {
     if (!ws) return
 
     const currentZoom = zoomRef.current
-    const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
 
     // Calculate width based on zoom level and duration
@@ -180,7 +179,7 @@ export function WaveformViewer() {
     // For zoom > 0, calculate as duration * zoom (pixels per second)
     let calculatedWidth: number
     if (currentZoom === 0) {
-      calculatedWidth = wrapper?.clientWidth || 0
+      calculatedWidth = ws.getWidth() || 0
     } else {
       // Calculate expected width: duration (seconds) * zoom (pixels per second)
       // Don't read from DOM - it may still have the old value during zoom transitions
@@ -640,10 +639,9 @@ export function WaveformViewer() {
 
     setIsZooming(true)
     const ws = wavesurferRef.current
-    const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
-    const viewportWidth = wrapper.clientWidth
-    const currentScrollLeft = wrapper.scrollLeft
+    const viewportWidth = ws.getWidth()
+    const currentScrollLeft = ws.getScroll()
 
     // Calculate effective zoom level
     const effectiveZoom = zoom === 0 ? viewportWidth / duration : zoom
@@ -676,9 +674,10 @@ export function WaveformViewer() {
     updateWidthAndTicks()
 
     // Single RAF is sufficient - triple nesting added 50ms+ delay
+    // Defer zoom(0) to the next frame so the container width is correct.
     requestAnimationFrame(() => {
       if (pendingScrollRef.current !== null) {
-        ws.getWrapper().scrollLeft = pendingScrollRef.current
+        ws.setScroll(pendingScrollRef.current)
         pendingScrollRef.current = null
       }
       setIsZooming(false)
@@ -689,10 +688,9 @@ export function WaveformViewer() {
     if (!wavesurferRef.current || isZooming) return
 
     const ws = wavesurferRef.current
-    const wrapper = ws.getWrapper()
     const duration = ws.getDuration()
-    const viewportWidth = wrapper.clientWidth
-    const currentScrollLeft = wrapper.scrollLeft
+    const viewportWidth = ws.getWidth()
+    const currentScrollLeft = ws.getScroll()
 
     // Calculate effective zoom level
     const effectiveZoom = zoom === 0 ? viewportWidth / duration : zoom
@@ -713,6 +711,24 @@ export function WaveformViewer() {
 
     setIsZooming(true)
 
+    // IMPORTANT: When returning to fit mode, we must defer zoom(0) until after
+    // React applies the fit layout. Otherwise WaveSurfer re-renders using the
+    // previous zoomed width and leaves extra scrollable space.
+    if (newZoom === 0) {
+      zoomRef.current = 0
+      setZoom(0)
+
+      requestAnimationFrame(() => {
+        const currentWs = wavesurferRef.current
+        if (!currentWs) return
+        currentWs.zoom(0)
+        updateWidthAndTicks()
+        currentWs.setScroll(0)
+        setIsZooming(false)
+      })
+      return
+    }
+
     // Calculate center time for scroll preservation
     const currentWidth = zoom === 0 ? viewportWidth : duration * zoom
     const viewportCenterPx = currentScrollLeft + (viewportWidth / 2)
@@ -731,9 +747,10 @@ export function WaveformViewer() {
     updateWidthAndTicks()
 
     // Single RAF is sufficient - triple nesting added 50ms+ delay
+    // Defer zoom(0) to the next frame so the container width is correct.
     requestAnimationFrame(() => {
       if (pendingScrollRef.current !== null) {
-        ws.getWrapper().scrollLeft = pendingScrollRef.current
+        ws.setScroll(pendingScrollRef.current)
         pendingScrollRef.current = null
       }
       setIsZooming(false)
@@ -747,14 +764,12 @@ export function WaveformViewer() {
     zoomRef.current = 0
     setZoom(0)
 
-    if (wavesurferRef.current) {
-      wavesurferRef.current.zoom(0)
-    }
-
-    updateWidthAndTicks()
-
-    // Single RAF is sufficient
     requestAnimationFrame(() => {
+      const ws = wavesurferRef.current
+      if (!ws) return
+      ws.zoom(0)
+      updateWidthAndTicks()
+      ws.setScroll(0)
       setIsZooming(false)
     })
   }
@@ -877,6 +892,22 @@ export function WaveformViewer() {
                 <div className="px-3 py-1.5 bg-white/10 border border-white/10 rounded text-sm font-mono text-foreground min-w-[120px] text-center">
                   {currentTimecode || secondsToTimecode(0, framerate, startTimecode)}
                 </div>
+
+                {/* Audio level meters - animated when playing */}
+                <div className="flex items-end gap-[2px] h-6 px-2">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div
+                      key={i}
+                      className="w-[3px] bg-primary rounded-sm transition-all duration-75"
+                      style={{
+                        height: isPlaying ? undefined : '4px',
+                        animation: isPlaying ? `soundbar 0.4s ease-in-out infinite` : 'none',
+                        animationDelay: isPlaying ? `${i * 0.08}s` : '0s',
+                      }}
+                    />
+                  ))}
+                </div>
+
                 <Button
                   variant="outline"
                   size="sm"
@@ -896,9 +927,14 @@ export function WaveformViewer() {
                 >
                   Zoom Out
                 </Button>
-                <span className="text-sm text-muted-foreground min-w-16 text-center">
-                  {isZooming ? '...' : zoom === 0 ? 'Fit' : `${zoom.toFixed(0)}x`}
-                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleZoomReset}
+                  disabled={zoom === 0 || isZooming}
+                >
+                  Fit
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"
@@ -906,14 +942,6 @@ export function WaveformViewer() {
                   disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1] || isZooming}
                 >
                   Zoom In
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleZoomReset}
-                  disabled={zoom === 0 || isZooming}
-                >
-                  Reset
                 </Button>
               </div>
 
