@@ -20,6 +20,11 @@ export function WaveformViewer() {
   const pendingScrollRef = useRef<number | null>(null) // Track pending scroll position after zoom
   const lastDragUpdateRef = useRef(0) // Throttle drag updates to 30fps
   const peaksOptimizedRef = useRef(false) // Prevent repeated peak optimization per file
+  const isZoomingRef = useRef(false) // Synchronous zoom guard to prevent race conditions
+
+  // Refs for framerate/startTimecode - used in drag handlers without triggering region recreation
+  const framerateRef = useRef(25)
+  const startTimecodeRef = useRef('00:00:00:00')
 
   // Refs to hold latest callback values - avoids putting callbacks in useEffect dependency arrays
   // which would cause regions to be destroyed/recreated on every interaction
@@ -31,10 +36,16 @@ export function WaveformViewer() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isReady, setIsReady] = useState(false)
   const [zoom, setZoom] = useState(0)
-  const [isZooming, setIsZooming] = useState(false)
+  const [isZooming, setIsZooming] = useState(false) // For UI overlay only
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
-  const [ticks, setTicks] = useState<Array<{ position: number; timecode: string; isMajor: boolean }>>([])
-  const [waveformWidth, setWaveformWidth] = useState(0)
+  // Combined state for ruler data - prevents double renders when updating width and ticks
+  const [rulerData, setRulerData] = useState<{
+    width: number
+    ticks: Array<{ position: number; timecode: string; isMajor: boolean; leftPx: number }>
+  }>({ width: 0, ticks: [] })
+  // Derived values from rulerData for easier access
+  const waveformWidth = rulerData.width
+  const ticks = rulerData.ticks
   const [draggingTimecodes, setDraggingTimecodes] = useState<{ start: string; end: string; startPos: number; endPos: number; activeHandle: 'start' | 'end' | 'both'; mouseX?: number; mouseY?: number } | null>(null)
   const dragStartRef = useRef<{ start: number; end: number } | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{ index: number; x: number; y: number } | null>(null)
@@ -146,9 +157,17 @@ export function WaveformViewer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedFile, fileId])
 
+  // Keep framerate/startTimecode refs updated for drag handlers
+  // These refs allow drag handlers to access current values without being in the regions useEffect deps
+  useEffect(() => {
+    framerateRef.current = framerate
+    startTimecodeRef.current = startTimecode
+  }, [framerate, startTimecode])
+
   // Ruler now scrolls naturally inside the waveform container - no sync needed!
 
   // Helper function to update width and ticks - can be called from anywhere
+  // PERFORMANCE: Combined into single state update to prevent double renders
   const updateWidthAndTicks = useCallback(() => {
     const ws = wavesurferRef.current
     if (!ws) return
@@ -171,9 +190,14 @@ export function WaveformViewer() {
     // Regenerate ticks with current zoom level from ref (synchronous, not React state)
     const newTicks = generateTicks(duration, currentZoom, framerate, startTimecode)
 
-    // Update both width and ticks atomically
-    setWaveformWidth(calculatedWidth)
-    setTicks(newTicks)
+    // Pre-calculate pixel positions for each tick to avoid calculations in render loop
+    const ticksWithPositions = newTicks.map(tick => ({
+      ...tick,
+      leftPx: (tick.position / duration) * calculatedWidth
+    }))
+
+    // Update both width and ticks atomically in single state update
+    setRulerData({ width: calculatedWidth, ticks: ticksWithPositions })
   }, [framerate, startTimecode])
 
   // Set initial width and ticks when ready
@@ -503,8 +527,9 @@ export function WaveformViewer() {
               isFirstUpdate = false
             }
 
-            const startTc = secondsToTimecode(region.start, framerate, startTimecode)
-            const endTc = secondsToTimecode(region.end, framerate, startTimecode)
+            // Use refs to get current framerate/startTimecode without adding to useEffect deps
+            const startTc = secondsToTimecode(region.start, framerateRef.current, startTimecodeRef.current)
+            const endTc = secondsToTimecode(region.end, framerateRef.current, startTimecodeRef.current)
 
             // Calculate pixel positions relative to waveform container
             const duration = wavesurferRef.current?.getDuration() || 1
@@ -588,9 +613,10 @@ export function WaveformViewer() {
       regionCreatedHandlerRef.current = handleRegionCreated
       regionsRef.current.on('region-created', handleRegionCreated)
     }
-  // PERFORMANCE: Callbacks removed from deps - we use refs (isSegmentSelectedRef, findCueForSegmentRef,
-  // handleSegmentClickRef) to access latest values without triggering region recreation
-  }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, addSegment])
+  // PERFORMANCE: Callbacks and framerate/startTimecode removed from deps - we use refs
+  // (isSegmentSelectedRef, findCueForSegmentRef, handleSegmentClickRef, framerateRef, startTimecodeRef)
+  // to access latest values without triggering region recreation
+  }, [segments, selectedSegments, activeCueId, project, updateSegment, addSegment])
 
   // Track mouse position during dragging
   useEffect(() => {
@@ -617,9 +643,12 @@ export function WaveformViewer() {
   }
 
   const handleZoomIn = () => {
-    if (!wavesurferRef.current || isZooming) return
+    // Use ref for synchronous guard to prevent race conditions when clicking rapidly
+    if (!wavesurferRef.current || isZoomingRef.current) return
 
-    setIsZooming(true)
+    isZoomingRef.current = true  // Synchronous - prevents overlapping zoom operations
+    setIsZooming(true)  // For UI overlay only
+
     const ws = wavesurferRef.current
     const duration = ws.getDuration()
     const viewportWidth = ws.getWidth()
@@ -660,12 +689,14 @@ export function WaveformViewer() {
         ws.setScroll(pendingScrollRef.current)
         pendingScrollRef.current = null
       }
+      isZoomingRef.current = false
       setIsZooming(false)
     })
   }
 
   const handleZoomOut = () => {
-    if (!wavesurferRef.current || isZooming) return
+    // Use ref for synchronous guard to prevent race conditions when clicking rapidly
+    if (!wavesurferRef.current || isZoomingRef.current) return
 
     const ws = wavesurferRef.current
     const duration = ws.getDuration()
@@ -689,7 +720,8 @@ export function WaveformViewer() {
       return
     }
 
-    setIsZooming(true)
+    isZoomingRef.current = true  // Synchronous - prevents overlapping zoom operations
+    setIsZooming(true)  // For UI overlay only
 
     // Defer zoom(0) until after layout so WaveSurfer uses the correct width.
     if (newZoom === 0) {
@@ -702,6 +734,7 @@ export function WaveformViewer() {
         currentWs.zoom(0)
         updateWidthAndTicks()
         currentWs.setScroll(0)
+        isZoomingRef.current = false
         setIsZooming(false)
       })
       return
@@ -729,14 +762,17 @@ export function WaveformViewer() {
         ws.setScroll(pendingScrollRef.current)
         pendingScrollRef.current = null
       }
+      isZoomingRef.current = false
       setIsZooming(false)
     })
   }
 
   const handleZoomReset = () => {
-    if (isZooming) return
+    // Use ref for synchronous guard to prevent race conditions when clicking rapidly
+    if (isZoomingRef.current) return
 
-    setIsZooming(true)
+    isZoomingRef.current = true  // Synchronous - prevents overlapping zoom operations
+    setIsZooming(true)  // For UI overlay only
     zoomRef.current = 0
     setZoom(0)
 
@@ -746,6 +782,7 @@ export function WaveformViewer() {
       ws.zoom(0)
       updateWidthAndTicks()
       ws.setScroll(0)
+      isZoomingRef.current = false
       setIsZooming(false)
     })
   }
@@ -780,7 +817,7 @@ export function WaveformViewer() {
             >
               {/* Timecode Ruler - flows naturally in document, scrolls with waveform */}
               {isReady && (() => {
-                // Always prefer waveformWidth from state (updated by handleRedraw) for consistency
+                // Always prefer waveformWidth from state (updated by updateWidthAndTicks) for consistency
                 // Fallback to direct DOM measurement if state not yet updated
                 let displayWidth = waveformWidth
                 if (!displayWidth || displayWidth === 0) {
@@ -795,8 +832,6 @@ export function WaveformViewer() {
                   }
                 }
 
-                const duration = wavesurferRef.current?.getDuration() || 1
-
                 return (
                   <div
                     ref={rulerRef}
@@ -806,36 +841,33 @@ export function WaveformViewer() {
                       minWidth: zoom === 0 ? '100%' : `${displayWidth}px`,
                     }}
                   >
-                    {ticks.map((tick, index) => {
-                      const leftPx = (tick.position / duration) * displayWidth
-
-                      return (
+                    {ticks.map((tick, index) => (
+                      // PERFORMANCE: tick.leftPx is pre-calculated in updateWidthAndTicks()
+                      <div
+                        key={index}
+                        className="absolute"
+                        style={{ left: `${tick.leftPx}px` }}
+                      >
+                        {/* Tick mark */}
                         <div
-                          key={index}
-                          className="absolute"
-                          style={{ left: `${leftPx}px` }}
-                        >
-                          {/* Tick mark */}
+                          className="bg-foreground/40"
+                          style={{
+                            width: '1px',
+                            height: tick.isMajor ? '12px' : '6px',
+                          }}
+                        />
+                        {/* Timecode label (only on major ticks) */}
+                        {tick.isMajor && (
                           <div
-                            className="bg-foreground/40"
-                            style={{
-                              width: '1px',
-                              height: tick.isMajor ? '12px' : '6px',
-                            }}
-                          />
-                          {/* Timecode label (only on major ticks) */}
-                          {tick.isMajor && (
-                            <div
-                              className={`absolute top-3 text-xs text-foreground/60 whitespace-nowrap ${
-                                index === 0 ? '' : '-translate-x-1/2'
-                              }`}
-                            >
-                              {tick.timecode}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
+                            className={`absolute top-3 text-xs text-foreground/60 whitespace-nowrap ${
+                              index === 0 ? '' : '-translate-x-1/2'
+                            }`}
+                          >
+                            {tick.timecode}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )
               })()}
