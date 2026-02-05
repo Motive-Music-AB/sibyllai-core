@@ -28,7 +28,6 @@ import type { Cue } from '@/lib/types'
  */
 // Reduced max zoom to prevent slow renders. 200 px/sec gives 8+ pixels per frame at 24fps.
 const ZOOM_LEVELS = [0, 10, 25, 50, 100, 200]
-const MAX_PEAKS_LENGTH = 8000
 
 export function WaveformViewer() {
   const waveformRef = useRef<HTMLDivElement>(null)
