@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import WaveSurfer from 'wavesurfer.js'
-import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions'
+import RegionsPlugin, { type Region } from 'wavesurfer.js/dist/plugins/regions'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 import { generateTicks, secondsToTimecode } from '@/lib/timecode'
+import type { Cue } from '@/lib/types'
 
 // Define zoom levels for smoother progression
 /**
@@ -27,6 +28,7 @@ import { generateTicks, secondsToTimecode } from '@/lib/timecode'
  */
 // Reduced max zoom to prevent slow renders. 200 px/sec gives 8+ pixels per frame at 24fps.
 const ZOOM_LEVELS = [0, 10, 25, 50, 100, 200]
+const MAX_PEAKS_LENGTH = 8000
 
 export function WaveformViewer() {
   const waveformRef = useRef<HTMLDivElement>(null)
@@ -35,6 +37,15 @@ export function WaveformViewer() {
   const rulerRef = useRef<HTMLDivElement>(null)
   const zoomRef = useRef(0) // Synchronous zoom tracking for redraw event handler
   const pendingScrollRef = useRef<number | null>(null) // Track pending scroll position after zoom
+  const lastDragUpdateRef = useRef(0) // Throttle drag updates to 30fps
+  const peaksOptimizedRef = useRef(false) // Prevent repeated peak optimization per file
+
+  // Refs to hold latest callback values - avoids putting callbacks in useEffect dependency arrays
+  // which would cause regions to be destroyed/recreated on every interaction
+  const isSegmentSelectedRef = useRef<(start: number, end: number) => boolean>(() => false)
+  const findCueForSegmentRef = useRef<(start: number, end: number) => Cue | null>((() => null))
+  const handleSegmentClickRef = useRef<(start: number, end: number) => void>(() => {})
+  const toggleSegmentSelectionRef = useRef<(start: number, end: number) => void>(() => {})
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [isReady, setIsReady] = useState(false)
@@ -46,7 +57,7 @@ export function WaveformViewer() {
   const [draggingTimecodes, setDraggingTimecodes] = useState<{ start: string; end: string; startPos: number; endPos: number; activeHandle: 'start' | 'end' | 'both'; mouseX?: number; mouseY?: number } | null>(null)
   const dragStartRef = useRef<{ start: number; end: number } | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<{ index: number; x: number; y: number } | null>(null)
-  const regionCreatedHandlerRef = useRef<((region: any) => void) | null>(null)
+  const regionCreatedHandlerRef = useRef<((region: Region) => void) | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; segmentIndex: number; splitTime: number } | null>(null)
 
   const {
@@ -62,7 +73,6 @@ export function WaveformViewer() {
     project,
     activeCueId,
     setActiveCueId,
-    playingCueId,
     setPlayingCueId,
     startTimecode,
     framerate,
@@ -71,6 +81,9 @@ export function WaveformViewer() {
   // Initialize WaveSurfer
   useEffect(() => {
     if (!waveformRef.current || !uploadedFile || !fileId) return
+
+    // Reset per-file optimization state
+    peaksOptimizedRef.current = false
 
     // Create WaveSurfer instance
     const ws = WaveSurfer.create({
@@ -97,27 +110,42 @@ export function WaveformViewer() {
     // Event handlers
     ws.on('ready', () => {
       setIsReady(true)
-      // Waveform auto-fits by default (no zoom call needed)
-      // Initial ticks and width are set by handleRedraw (triggered by isReady state change)
-
-      // Initialize timecode display
       setCurrentTimecode(secondsToTimecode(0, framerate, startTimecode))
+
+      // Performance: Replace full-resolution decoded data with downsampled peaks
+      if (!peaksOptimizedRef.current) {
+        peaksOptimizedRef.current = true
+        const duration = ws.getDuration()
+        // Cap at 2000 peaks total regardless of duration for consistent performance
+        const MAX_PEAKS = 2000
+        const maxLength = Math.min(MAX_PEAKS, Math.max(100, Math.ceil(duration * 50)))
+
+        console.log(`[Waveform] Duration: ${duration.toFixed(1)}s, Downsampling to ${maxLength} peaks`)
+
+        setTimeout(() => {
+          if (wavesurferRef.current !== ws) return
+          try {
+            const peaks = ws.exportPeaks({ maxLength })
+            console.log(`[Waveform] Exported ${peaks[0]?.length || 0} peaks`)
+            ws.setOptions({ peaks, duration })
+          } catch (err) {
+            console.warn('Waveform peak optimization failed:', err)
+          }
+        }, 0)
+      }
     })
 
     ws.on('play', () => setIsPlaying(true))
     ws.on('pause', () => setIsPlaying(false))
 
-    // Update playhead timecode during playback
     ws.on('audioprocess', (currentTime) => {
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
     })
 
-    // Update timecode when seeking
     ws.on('seeking', (currentTime) => {
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
     })
 
-    // Update timecode on click
     ws.on('interaction', () => {
       const currentTime = ws.getCurrentTime()
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
@@ -127,6 +155,12 @@ export function WaveformViewer() {
     return () => {
       ws.destroy()
       URL.revokeObjectURL(url)
+      if (wavesurferRef.current === ws) {
+        wavesurferRef.current = null
+      }
+      if (regionsRef.current === regions) {
+        regionsRef.current = null
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uploadedFile, fileId])
@@ -160,7 +194,7 @@ export function WaveformViewer() {
     // Update both width and ticks atomically
     setWaveformWidth(calculatedWidth)
     setTicks(newTicks)
-  }, [zoom, framerate, startTimecode])
+  }, [framerate, startTimecode])
 
   // Set initial width and ticks when ready
   // Note: We no longer listen to redraw events - they fire too frequently and cause
@@ -178,7 +212,7 @@ export function WaveformViewer() {
   }, [selectedSegments])
 
   // Helper to find cue for a segment
-  const findCueForSegment = useCallback((start: number, end: number) => {
+  const findCueForSegment = useCallback((start: number, end: number): Cue | null => {
     if (!project?.cues) return null
     return project.cues.find((cue) =>
       Math.abs(cue.start - start) < 0.01 && Math.abs(cue.end - end) < 0.01
@@ -199,6 +233,15 @@ export function WaveformViewer() {
     }
     // Before analysis, do nothing - only the Select button should toggle selection
   }, [project, findCueForSegment, setActiveCueId])
+
+  // Keep refs updated with latest callback values
+  // This allows the regions useEffect to use stable refs instead of callbacks in deps
+  useEffect(() => {
+    isSegmentSelectedRef.current = isSegmentSelected
+    findCueForSegmentRef.current = findCueForSegment
+    handleSegmentClickRef.current = handleSegmentClick
+    toggleSegmentSelectionRef.current = toggleSegmentSelection
+  })
 
   // Helper to toggle segment selection
   const toggleSegmentSelection = (start: number, end: number) => {
@@ -306,6 +349,7 @@ export function WaveformViewer() {
   // regenerated with the old width before WaveSurfer finishes rendering.
 
   // Update regions when segments, selection, or active cue changes
+  // PERFORMANCE: Uses refs for callbacks to avoid recreating all regions when callbacks change
   useEffect(() => {
     if (!regionsRef.current) return
 
@@ -328,101 +372,101 @@ export function WaveformViewer() {
       console.warn(`Too many segments (${segments.length}). Only rendering first ${MAX_REGIONS}. Increase threshold to detect fewer cues.`)
     }
 
-    // Add new regions with appropriate styling
-    // Use setTimeout with index to add regions asynchronously, preventing UI freeze
-    segmentsToRender.forEach(([start, end], index) => {
-      setTimeout(() => {
-        if (!regionsRef.current) return
+    // Add new regions synchronously - no staggered setTimeout
+    // Staggering created competing timers that blocked scroll events
+    segmentsToRender.forEach(([start, end]) => {
+      if (!regionsRef.current) return
 
-        const actualIndex = segments.findIndex(([s, e]) => s === start && e === end)
-        const selected = isSegmentSelected(start, end)
-        const cue = findCueForSegment(start, end)
-        const isActive = cue && activeCueId === cue.id
+      const actualIndex = segments.findIndex(([s, e]) => s === start && e === end)
+      // Use refs to get latest values without adding to dependency array
+      const selected = isSegmentSelectedRef.current(start, end)
+      const cue = findCueForSegmentRef.current(start, end)
+      const isActive = cue && activeCueId === cue.id
 
-        // Determine color based on state
-        let color: string
-        if (isActive) {
-          color = 'rgba(59, 130, 246, 0.5)' // Bright blue for active
-        } else if (selected) {
-          color = 'rgba(34, 197, 94, 0.3)' // Green for selected
-        } else {
-          color = 'rgba(148, 163, 184, 0.2)' // Light gray for unselected
-        }
+      // Determine color based on state
+      let color: string
+      if (isActive) {
+        color = 'rgba(59, 130, 246, 0.5)' // Bright blue for active
+      } else if (selected) {
+        color = 'rgba(34, 197, 94, 0.3)' // Green for selected
+      } else {
+        color = 'rgba(148, 163, 184, 0.2)' // Light gray for unselected
+      }
 
-        // Enable dragging/resizing only before analysis
-        const editable = !project
+      // Enable dragging/resizing only before analysis
+      const editable = !project
 
-        const region = regionsRef.current?.addRegion({
+      const region = regionsRef.current?.addRegion({
         start,
         end,
         color,
         drag: editable,
         resize: editable,
         content: '',  // Empty content, we'll add button manually
+      })
+
+      // Add event handlers
+      if (region && region.element) {
+        // Add visual separation between adjacent cues (border on both sides)
+        region.element.style.borderLeft = '2px solid rgba(100, 116, 139, 0.6)'
+        region.element.style.borderRight = '2px solid rgba(100, 116, 139, 0.6)'
+        region.element.style.boxSizing = 'border-box'
+
+        // Create and add select button programmatically
+        const button = document.createElement('button')
+        button.className = 'region-select-btn'
+        button.textContent = selected ? '✓' : 'Select'
+        button.style.cssText = `
+          position: absolute;
+          top: 4px;
+          right: 4px;
+          padding: 2px 8px;
+          font-size: 11px;
+          font-weight: 500;
+          border: none;
+          border-radius: 3px;
+          cursor: pointer;
+          z-index: 10;
+          background-color: ${selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(148, 163, 184, 0.7)'};
+          color: white;
+          transition: background-color 0.2s;
+        `
+
+        // Add hover effects
+        button.addEventListener('mouseenter', () => {
+          button.style.opacity = '0.8'
+        })
+        button.addEventListener('mouseleave', () => {
+          button.style.opacity = '1'
         })
 
-        // Add event handlers
-        if (region && region.element) {
-          // Add visual separation between adjacent cues (border on both sides)
-          region.element.style.borderLeft = '2px solid rgba(100, 116, 139, 0.6)'
-          region.element.style.borderRight = '2px solid rgba(100, 116, 139, 0.6)'
-          region.element.style.boxSizing = 'border-box'
+        // Add click handler for select button
+        button.addEventListener('click', (e) => {
+          e.stopPropagation() // Prevent region click
+          toggleSegmentSelectionRef.current(start, end)
+        })
 
-          // Create and add select button programmatically
-          const button = document.createElement('button')
-          button.className = 'region-select-btn'
-          button.textContent = selected ? '✓' : 'Select'
-          button.style.cssText = `
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            padding: 2px 8px;
-            font-size: 11px;
-            font-weight: 500;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-            z-index: 10;
-            background-color: ${selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(148, 163, 184, 0.7)'};
-            color: white;
-            transition: background-color 0.2s;
-          `
+        // Append button to region element
+        region.element.appendChild(button)
 
-          // Add hover effects
-          button.addEventListener('mouseenter', () => {
-            button.style.opacity = '0.8'
-          })
-          button.addEventListener('mouseleave', () => {
-            button.style.opacity = '1'
-          })
+        // Click handler - use ref to get latest callback
+        region.on('click', (e) => {
+          // Check if it's a right-click
+          if (e.button === 2) {
+            e.preventDefault()
+            e.stopPropagation()
 
-          // Add click handler for select button
-          button.addEventListener('click', (e) => {
-            e.stopPropagation() // Prevent region click
-            toggleSegmentSelection(start, end)
-          })
-
-          // Append button to region element
-          region.element.appendChild(button)
-
-          // Click handler
-          region.on('click', (e) => {
-            // Check if it's a right-click
-            if (e.button === 2) {
-              e.preventDefault()
-              e.stopPropagation()
-
-              // Only show context menu before analysis
-              if (!project) {
-                setContextMenu({
-                  x: e.clientX,
-                  y: e.clientY,
-                  segmentIndex: actualIndex,
-                })
-              }
+            // Only show context menu before analysis
+            if (!project) {
+              setContextMenu({
+                x: e.clientX,
+                y: e.clientY,
+                segmentIndex: actualIndex,
+              })
+            }
           } else {
-            // Left click - normal behavior
-            handleSegmentClick(start, end)
+            // Left click - normal behavior, use ref for latest callback
+            handleSegmentClickRef.current(start, end)
           }
         })
 
@@ -466,8 +510,13 @@ export function WaveformViewer() {
           // WaveSurfer regions may not have update-start event, so we capture on first update
           let isFirstUpdate = true
 
-          // Show timecode while dragging
+          // Show timecode while dragging - THROTTLED to 30fps to prevent state update spam
           region.on('update', () => {
+            // Throttle updates to max 30fps (every 33ms)
+            const now = Date.now()
+            if (now - lastDragUpdateRef.current < 33) return
+            lastDragUpdateRef.current = now
+
             // Capture initial position on first update (start of drag)
             if (isFirstUpdate) {
               handleDragStart()
@@ -526,47 +575,42 @@ export function WaveformViewer() {
             isFirstUpdate = true
           })
         }
-        }
-      }, index * 10) // Stagger region creation by 10ms each to prevent UI freeze
+      }
     })
 
-    // After all programmatic regions are added, enable drag-to-create for user
-    // Only enable if before analysis (project is null) and detection has run
-    if (!project && segments.length > 0) {
-      setTimeout(() => {
-        if (!regionsRef.current) return
+    // Enable drag-to-create for user (only before analysis and after detection)
+    if (!project && segments.length > 0 && regionsRef.current) {
+      // Remove old region-created listener if it exists
+      if (regionCreatedHandlerRef.current) {
+        regionsRef.current.un('region-created', regionCreatedHandlerRef.current)
+      }
 
-        // Remove old region-created listener if it exists
-        if (regionCreatedHandlerRef.current) {
-          regionsRef.current.un('region-created', regionCreatedHandlerRef.current)
+      // Enable drag selection for creating new regions
+      regionsRef.current.enableDragSelection({
+        color: 'rgba(148, 163, 184, 0.2)',
+      })
+
+      // Listen for user-created regions (drag-to-create)
+      const handleRegionCreated = (region: Region) => {
+        // Only add if it's a new region (not already in segments)
+        const exists = segments.some(([s, e]) =>
+          Math.abs(s - region.start) < 0.1 && Math.abs(e - region.end) < 0.1
+        )
+        if (!exists) {
+          // Use setTimeout(0) to defer state update to next tick
+          setTimeout(() => {
+            addSegment(region.start, region.end)
+          }, 0)
         }
+      }
 
-        // Enable drag selection for creating new regions
-        regionsRef.current.enableDragSelection({
-          color: 'rgba(148, 163, 184, 0.2)',
-        })
-
-        // Listen for user-created regions (drag-to-create)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const handleRegionCreated = (region: any) => {
-          // Only add if it's a new region (not already in segments)
-          const exists = segments.some(([s, e]) =>
-            Math.abs(s - region.start) < 0.1 && Math.abs(e - region.end) < 0.1
-          )
-          if (!exists) {
-            setTimeout(() => {
-              addSegment(region.start, region.end)
-            }, 0)
-          }
-        }
-
-        // Store reference and add listener
-        regionCreatedHandlerRef.current = handleRegionCreated
-        regionsRef.current.on('region-created', handleRegionCreated)
-      }, (segmentsToRender.length + 1) * 10) // Wait for all regions to be added
+      // Store reference and add listener
+      regionCreatedHandlerRef.current = handleRegionCreated
+      regionsRef.current.on('region-created', handleRegionCreated)
     }
-  // Note: zoom removed from deps - we use zoomRef.current inside handlers to avoid recreating regions on zoom
-  }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, addSegment, isSegmentSelected, findCueForSegment, handleSegmentClick])
+  // PERFORMANCE: Callbacks removed from deps - we use refs (isSegmentSelectedRef, findCueForSegmentRef,
+  // handleSegmentClickRef) to access latest values without triggering region recreation
+  }, [segments, selectedSegments, activeCueId, project, framerate, startTimecode, updateSegment, addSegment])
 
   // Track mouse position during dragging
   useEffect(() => {
@@ -632,16 +676,13 @@ export function WaveformViewer() {
 
     updateWidthAndTicks()
 
+    // Single RAF is sufficient - triple nesting added 50ms+ delay
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (pendingScrollRef.current !== null) {
-            ws.getWrapper().scrollLeft = pendingScrollRef.current
-            pendingScrollRef.current = null
-          }
-          setIsZooming(false)
-        })
-      })
+      if (pendingScrollRef.current !== null) {
+        ws.getWrapper().scrollLeft = pendingScrollRef.current
+        pendingScrollRef.current = null
+      }
+      setIsZooming(false)
     })
   }
 
@@ -690,16 +731,13 @@ export function WaveformViewer() {
 
     updateWidthAndTicks()
 
+    // Single RAF is sufficient - triple nesting added 50ms+ delay
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (pendingScrollRef.current !== null) {
-            ws.getWrapper().scrollLeft = pendingScrollRef.current
-            pendingScrollRef.current = null
-          }
-          setIsZooming(false)
-        })
-      })
+      if (pendingScrollRef.current !== null) {
+        ws.getWrapper().scrollLeft = pendingScrollRef.current
+        pendingScrollRef.current = null
+      }
+      setIsZooming(false)
     })
   }
 
@@ -716,10 +754,9 @@ export function WaveformViewer() {
 
     updateWidthAndTicks()
 
+    // Single RAF is sufficient
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setIsZooming(false)
-      })
+      setIsZooming(false)
     })
   }
 
@@ -728,12 +765,11 @@ export function WaveformViewer() {
   }
 
   return (
-    <Card className="w-full border-white/10 shadow-none">
+    <Card className="w-full border-white/10 shadow-none waveform-card">
       <CardContent className="pt-6">
         <div className="space-y-4">
           <div
-            className="overflow-x-auto rounded-lg bg-[rgba(30,20,15,0.6)] relative"
-            style={{ willChange: 'scroll-position', transform: 'translateZ(0)' }}
+            className="overflow-x-auto rounded-lg bg-[rgba(30,20,15,0.6)] relative waveform-scroll-container"
           >
             {/* Zoom loading overlay */}
             {isZooming && (

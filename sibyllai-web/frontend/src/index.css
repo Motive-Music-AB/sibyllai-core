@@ -141,20 +141,37 @@ html {
 
 body {
   /* Floral bokeh background image with fallback gradient */
+  min-height: 100vh;
+  color: var(--color-foreground);
+  position: relative;
+}
+
+/* Background image with blur and darkening filter */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
   background:
-    linear-gradient(
-      to bottom,
-      rgba(30, 18, 15, 0.3) 0%,
-      rgba(30, 18, 15, 0.1) 50%,
-      rgba(30, 18, 15, 0.4) 100%
-    ),
     url('/floral_bokeh_4x_upscaled.png');
   background-size: cover;
   background-position: center;
-  background-attachment: fixed;
   background-repeat: no-repeat;
-  min-height: 100vh;
-  color: var(--color-foreground);
+  filter: blur(20px) brightness(0.6);
+}
+
+/* Dark overlay on top of blurred background */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(
+    to bottom,
+    rgba(15, 8, 6, 0.6) 0%,
+    rgba(15, 8, 6, 0.4) 50%,
+    rgba(15, 8, 6, 0.7) 100%
+  );
 }
 
 /* =============================================================================
@@ -234,6 +251,22 @@ body {
   background: var(--color-glass-lighter);
   border-radius: var(--radius-lg);
   padding: 1rem;
+}
+
+/* PERFORMANCE: Disable expensive backdrop-blur on waveform card during scroll
+   backdrop-filter forces re-compositing on every scroll frame */
+.waveform-card,
+.waveform-card[data-slot="card"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  /* Use solid background instead of blur for performance */
+  background: rgba(35, 24, 19, 0.95) !important;
+}
+
+/* Isolate scroll repaints to waveform container */
+.waveform-scroll-container {
+  /* Use layout containment only - strict can clip content */
+  contain: layout style;
 }
 
 /* =============================================================================
