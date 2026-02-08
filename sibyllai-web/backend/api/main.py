@@ -1,5 +1,5 @@
 """SibyllAI FastAPI Backend - Two-Phase Music Analysis API."""
-from fastapi import FastAPI, UploadFile, File, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pathlib import Path
@@ -17,6 +17,19 @@ sys.path.insert(0, str(Path(__file__).parents[1]))  # Add backend directory to p
 
 from core.segmentation import segment_only
 from core.analysis import analyze_segments
+from core.library_index import (
+    DEFAULT_DB_PATH,
+    DEFAULT_HOP_RATIO,
+    DEFAULT_WINDOW_SIZES,
+    build_library_index,
+    build_features_from_cue,
+    build_vector_from_cue,
+    get_library_info,
+    load_meta_from_db,
+    load_schema_from_db,
+    normalize_key,
+    match_cue_to_library,
+)
 from sibyllai_core.sibyl_format import load_project
 
 app = FastAPI(
@@ -46,6 +59,7 @@ active_connections: dict[str, WebSocket] = {}
 
 # Analysis status tracking (for progress updates)
 analysis_status: dict[str, dict] = {}
+library_status: dict[str, dict] = {}
 
 # Thread pool for background analysis
 executor = ThreadPoolExecutor(max_workers=2)
@@ -58,6 +72,7 @@ class SegmentPreviewRequest(BaseModel):
     min_gap: float = 5.0
     min_cue_length: float = 3.0
     silence_thresh: float = 0.01
+    mix_type: str = "full_mix"  # "clean_mx" for music-only, "full_mix" for full film mix
 
 
 class SegmentPreviewResponse(BaseModel):
@@ -92,6 +107,33 @@ class CueUpdateRequest(BaseModel):
     genres: Optional[list[str]] = None
     style: Optional[list[str]] = None
     moods: Optional[list[str]] = None
+
+
+class CueReplacementRequest(BaseModel):
+    track_path: str
+    start: float
+    end: float
+    score: float
+    window_size: float
+    status: str = "matched"
+
+
+class LibraryBuildRequest(BaseModel):
+    folder: str
+    window_sizes: Optional[list[float]] = None
+    hop_ratio: float = DEFAULT_HOP_RATIO
+    include_moods: bool = True
+    reset: bool = True
+    db_path: Optional[str] = None
+    dedupe_simple: bool = True
+
+
+class LibraryMatchRequest(BaseModel):
+    session_id: str
+    cue_id: str
+    top_n: int = 3
+    db_path: Optional[str] = None
+    unique_tracks: bool = True
 
 
 # Endpoints
@@ -196,7 +238,8 @@ async def segment_preview(request: SegmentPreviewRequest):
             music_thresh=request.music_thresh,
             min_gap=request.min_gap,
             min_cue_length=request.min_cue_length,
-            silence_thresh=request.silence_thresh
+            silence_thresh=request.silence_thresh,
+            mix_type=request.mix_type,
         )
 
         return SegmentPreviewResponse(
@@ -263,6 +306,123 @@ def run_analysis_in_background(
             "error": str(e),
             "project": None
         }
+
+
+def run_library_build_in_background(job_id: str, request: LibraryBuildRequest, source_name: str | None = None, source_type: str | None = None):
+    """Build library index in background thread and update status dict."""
+    try:
+        def progress_callback(update: dict):
+            total = update.get("total_tracks", 0) or 0
+            current = update.get("current_track", 0) or 0
+            progress_percent = (current / total) * 100 if total > 0 else 0
+            library_status[job_id] = {
+                "status": "running",
+                "progress_percent": progress_percent,
+                "current": current,
+                "total": total,
+                "windows_indexed": update.get("windows_indexed", 0),
+                "message": update.get("message", "Building index..."),
+                "result": None,
+                "error": None,
+            }
+
+        result = build_library_index(
+            folder=Path(request.folder),
+            db_path=Path(request.db_path) if request.db_path else DEFAULT_DB_PATH,
+            window_sizes=request.window_sizes or DEFAULT_WINDOW_SIZES,
+            hop_ratio=request.hop_ratio,
+            include_moods=request.include_moods,
+            reset=request.reset,
+            progress_callback=progress_callback,
+            source_name=source_name,
+            source_type=source_type,
+            dedupe_simple=request.dedupe_simple,
+        )
+        library_status[job_id] = {
+            "status": "complete",
+            "progress_percent": 100,
+            "current": result.get("tracks_indexed", 0),
+            "total": result.get("tracks_indexed", 0),
+            "windows_indexed": result.get("windows_indexed", 0),
+            "message": "Index build complete",
+            "result": result,
+            "error": None,
+        }
+    except Exception as e:
+        library_status[job_id] = {
+            "status": "error",
+            "progress_percent": 0,
+            "current": 0,
+            "total": 0,
+            "windows_indexed": 0,
+            "message": "Index build failed",
+            "result": None,
+            "error": str(e),
+        }
+
+
+def _top_items(scores: dict[str, float], n: int = 3) -> list[str]:
+    return [k for k, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True)[:n]]
+
+
+def _build_match_reasons(cue_features: dict, match_features: dict) -> list[str]:
+    reasons: list[str] = []
+
+    # Tempo
+    cue_bpm = cue_features.get("bpm")
+    match_bpm = match_features.get("bpm")
+    if isinstance(cue_bpm, (int, float)) and isinstance(match_bpm, (int, float)):
+        diff = abs(cue_bpm - match_bpm)
+        if diff <= 5:
+            reasons.append("Similar tempo")
+        elif diff <= 12:
+            reasons.append("Close tempo")
+
+    # Key
+    cue_key = normalize_key(cue_features.get("key"))
+    match_key = normalize_key(match_features.get("key"))
+    if cue_key and match_key:
+        if cue_key == match_key:
+            reasons.append("Same key")
+        elif cue_key[0] == match_key[0]:
+            reasons.append("Parallel key")
+
+    # Instruments overlap
+    cue_inst = cue_features.get("instruments", {})
+    match_inst = match_features.get("instruments", {})
+    if cue_inst and match_inst:
+        cue_top = set(_top_items(cue_inst, 3))
+        match_top = set(_top_items(match_inst, 3))
+        overlap = list(cue_top & match_top)
+        if overlap:
+            reasons.append(f"Instrument: {overlap[0]}")
+
+    # CLAP genre/style overlap
+    cue_clap = cue_features.get("clap", {}).get("genre", {})
+    match_clap = match_features.get("clap", {}).get("genre", {})
+    if cue_clap and match_clap:
+        cue_top = _top_items(cue_clap, 1)
+        match_top = _top_items(match_clap, 1)
+        if cue_top and match_top and cue_top[0] == match_top[0]:
+            reasons.append(f"Style: {cue_top[0]}")
+
+    # Valence/arousal proximity
+    cue_val = cue_features.get("valence")
+    cue_aro = cue_features.get("arousal")
+    match_val = match_features.get("valence")
+    match_aro = match_features.get("arousal")
+    if all(isinstance(v, (int, float)) for v in [cue_val, cue_aro, match_val, match_aro]):
+        if abs(cue_val - match_val) <= 0.5 and abs(cue_aro - match_aro) <= 0.5:
+            reasons.append("Similar mood")
+
+    # Deduplicate and keep top 3
+    out: list[str] = []
+    for r in reasons:
+        if r not in out:
+            out.append(r)
+        if len(out) >= 3:
+            break
+    return out
 
 
 @app.post("/api/analyze-cues")
@@ -447,6 +607,221 @@ async def update_cue(session_id: str, cue_id: str, update: CueUpdateRequest):
         raise HTTPException(status_code=500, detail=f"Failed to update cue: {str(e)}")
 
 
+@app.put("/api/projects/{session_id}/cues/{cue_id}/replacement")
+async def update_cue_replacement(session_id: str, cue_id: str, update: CueReplacementRequest):
+    """
+    Update replacement info for a specific cue.
+    Persists project_context replacement and status to project.sibyl.json.
+    """
+    import json
+
+    project_path = OUTPUT_DIR / session_id / "project.sibyl.json"
+
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    try:
+        with open(project_path, 'r') as f:
+            project = json.load(f)
+
+        cue_found = False
+        for cue in project.get("cues", []):
+            if cue.get("id") == cue_id:
+                cue_found = True
+                project_context = cue.get("project_context", {})
+                project_context["status"] = update.status
+                project_context["replacement"] = {
+                    "track_path": update.track_path,
+                    "start": update.start,
+                    "end": update.end,
+                    "score": update.score,
+                    "window_size": update.window_size,
+                }
+                cue["project_context"] = project_context
+                break
+
+        if not cue_found:
+            raise HTTPException(status_code=404, detail=f"Cue {cue_id} not found")
+
+        with open(project_path, 'w') as f:
+            json.dump(project, f, indent=2)
+
+        return {"status": "updated", "cue_id": cue_id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update replacement: {str(e)}")
+
+
+@app.post("/api/library/build")
+async def build_library(request: LibraryBuildRequest):
+    """
+    Build or rebuild the local library index from a folder of audio files.
+    Runs in a background thread and returns a job_id for polling.
+    """
+    folder = Path(request.folder)
+    if not folder.exists() or not folder.is_dir():
+        raise HTTPException(status_code=400, detail="Folder not found or not a directory")
+
+    job_id = str(uuid.uuid4())
+    library_status[job_id] = {
+        "status": "running",
+        "progress_percent": 0,
+        "current": 0,
+        "total": 0,
+        "windows_indexed": 0,
+        "message": "Starting index build",
+        "result": None,
+        "error": None,
+    }
+
+    executor.submit(
+        run_library_build_in_background,
+        job_id,
+        request,
+        Path(request.folder).name,
+        "path",
+    )
+
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.post("/api/library/build-upload")
+async def build_library_upload(
+    files: list[UploadFile] = File(...),
+    include_moods: bool = Form(True),
+    reset: bool = Form(True),
+    dedupe_simple: bool = Form(True),
+):
+    """
+    Build library index by uploading a folder of audio files from the client.
+    """
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+
+    job_id = str(uuid.uuid4())
+    upload_root = Path("temp/library_uploads") / job_id
+    upload_root.mkdir(parents=True, exist_ok=True)
+
+    library_status[job_id] = {
+        "status": "running",
+        "progress_percent": 0,
+        "current": 0,
+        "total": 0,
+        "windows_indexed": 0,
+        "message": "Uploading files...",
+        "result": None,
+        "error": None,
+    }
+
+    source_name = None
+    for upload in files:
+        rel_path = Path(upload.filename)
+        if source_name is None and len(rel_path.parts) > 0:
+            source_name = rel_path.parts[0]
+        dest = upload_root / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with open(dest, "wb") as buffer:
+            shutil.copyfileobj(upload.file, buffer)
+
+    request = LibraryBuildRequest(
+        folder=str(upload_root),
+        include_moods=include_moods,
+        reset=reset,
+        dedupe_simple=dedupe_simple,
+    )
+
+    executor.submit(
+        run_library_build_in_background,
+        job_id,
+        request,
+        source_name,
+        "upload",
+    )
+
+    return {"job_id": job_id, "status": "running"}
+
+
+@app.get("/api/library/status/{job_id}")
+async def library_build_status(job_id: str):
+    if job_id not in library_status:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return library_status[job_id]
+
+
+@app.get("/api/library/info")
+async def library_info(db_path: Optional[str] = None):
+    """Return info about the current library index if it exists."""
+    path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    return get_library_info(path)
+
+
+@app.post("/api/library/match")
+async def match_library(request: LibraryMatchRequest):
+    """
+    Match a cue from an analyzed project to the library index.
+    Returns top N matches with in-track time ranges.
+    """
+    db_path = Path(request.db_path) if request.db_path else DEFAULT_DB_PATH
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail="Library index not found")
+
+    project_path = OUTPUT_DIR / request.session_id / "project.sibyl.json"
+    if not project_path.exists():
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = load_project(project_path)
+    cue = next((c for c in project.get("cues", []) if c.get("id") == request.cue_id), None)
+    if not cue:
+        raise HTTPException(status_code=404, detail="Cue not found")
+
+    schema = load_schema_from_db(db_path)
+    meta = load_meta_from_db(db_path)
+    include_moods = bool(meta.get("include_moods", True))
+    window_sizes = meta.get("window_sizes", DEFAULT_WINDOW_SIZES)
+    cue_features = build_features_from_cue(cue)
+    cue_vector = build_vector_from_cue(cue, schema, include_moods=include_moods)
+    cue_length = float(cue.get("end", 0.0) - cue.get("start", 0.0))
+
+    matches = match_cue_to_library(
+        cue_vector=cue_vector,
+        cue_length=cue_length,
+        db_path=db_path,
+        top_n=request.top_n,
+        window_sizes=window_sizes,
+        unique_tracks=request.unique_tracks,
+        include_features=True,
+    )
+
+    for match in matches:
+        features = match.pop("features", {})
+        match["reasons"] = _build_match_reasons(cue_features, features)
+        # Include key metadata for display
+        match["bpm"] = features.get("bpm")
+        match["key"] = features.get("key")
+        # Get top instruments (sorted by confidence)
+        instruments = features.get("instruments", {})
+        if instruments:
+            sorted_inst = sorted(instruments.items(), key=lambda x: x[1], reverse=True)[:5]
+            match["instruments"] = [name for name, _ in sorted_inst]
+        else:
+            match["instruments"] = []
+        # Get top genres
+        genres = features.get("genres", {})
+        if genres:
+            sorted_genres = sorted(genres.items(), key=lambda x: x[1], reverse=True)[:3]
+            match["genres"] = [name for name, _ in sorted_genres]
+        else:
+            match["genres"] = []
+
+    return {
+        "cue_id": request.cue_id,
+        "cue_length": cue_length,
+        "matches": matches,
+    }
+
+
 # Optional: Cleanup endpoint
 @app.delete("/api/cleanup/{file_id}")
 async def cleanup_files(file_id: str):
@@ -466,4 +841,4 @@ async def cleanup_files(file_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    uvicorn.run(app, host="0.0.0.0", port=8003)

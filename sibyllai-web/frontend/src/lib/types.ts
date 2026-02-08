@@ -12,6 +12,7 @@ export interface SegmentPreviewRequest {
   min_gap: number
   min_cue_length: number
   silence_thresh: number
+  mix_type: 'clean_mx' | 'full_mix'
 }
 
 export interface SegmentPreviewResponse {
@@ -83,6 +84,15 @@ export interface ProjectContextCue {
   notes: string
   color: string
   status: string
+  replacement?: CueReplacement
+}
+
+export interface CueReplacement {
+  track_path: string
+  start: number
+  end: number
+  score: number
+  window_size: number
 }
 
 export interface MusicalProfile {
@@ -132,4 +142,90 @@ export interface CueUpdateRequest {
 export interface CueUpdateResponse {
   status: string
   cue_id: string
+}
+
+// Library index / matching types
+export interface LibraryBuildRequest {
+  folder: string
+  window_sizes?: number[]
+  hop_ratio?: number
+  include_moods?: boolean
+  reset?: boolean
+  db_path?: string
+}
+
+export interface LibraryBuildResponse {
+  job_id: string
+  status: string
+}
+
+export interface LibraryBuildResult {
+  tracks_indexed: number
+  windows_indexed: number
+  db_path: string
+  vector_dim: number
+}
+
+export interface LibraryBuildStatus {
+  status: 'running' | 'complete' | 'error'
+  progress_percent?: number
+  current?: number
+  total?: number
+  windows_indexed?: number
+  message?: string
+  result: LibraryBuildResult | null
+  error: string | null
+}
+
+export interface LibraryMatchRequest {
+  session_id: string
+  cue_id: string
+  top_n?: number
+  db_path?: string
+  unique_tracks?: boolean
+}
+
+export interface LibraryMatch {
+  window_id: string
+  track_id: string
+  track_path: string
+  start: number
+  end: number
+  duration: number
+  window_size: number
+  score: number
+  reasons?: string[]
+  // Match metadata for display
+  bpm?: number | null
+  key?: string | null
+  instruments?: string[]
+  genres?: string[]
+}
+
+export interface LibraryMatchResponse {
+  cue_id: string
+  cue_length: number
+  matches: LibraryMatch[]
+}
+
+export interface CueReplacementRequest {
+  track_path: string
+  start: number
+  end: number
+  score: number
+  window_size: number
+  status?: string
+}
+
+export interface CueReplacementResponse {
+  status: string
+  cue_id: string
+}
+
+export interface LibraryInfo {
+  exists: boolean
+  db_path: string
+  tracks: number
+  windows: number
+  meta: Record<string, unknown>
 }

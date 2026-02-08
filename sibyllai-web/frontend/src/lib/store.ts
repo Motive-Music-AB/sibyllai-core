@@ -1,7 +1,8 @@
 import { create } from 'zustand'
-import type { SibylProject, CuratedAttributes } from './types'
+import type { SibylProject, CuratedAttributes, ProjectContextCue } from './types'
 
-type Page = 'analysis' | 'cuesynch'
+type Page = 'analysis' | 'cuesynch' | 'replacement'
+type MixType = 'clean_mx' | 'full_mix'
 
 interface AppState {
   // Navigation state
@@ -15,6 +16,7 @@ interface AppState {
   framerate: number
 
   // Segmentation state (Phase 1)
+  mixType: MixType  // Clean MX (music only) vs Full Mix (with dialogue/SFX)
   segments: [number, number][]
   selectedSegments: [number, number][]  // User-selected segments for analysis
   duration: number
@@ -41,6 +43,7 @@ interface AppState {
   setUploadedFile: (file: File, fileId: string, fileName: string, startTimecode: string, framerate: number) => void
   setStartTimecode: (tc: string) => void
   setFramerate: (fps: number) => void
+  setMixType: (mixType: MixType) => void
   setSegments: (segments: [number, number][], duration: number) => void
   setSelectedSegments: (segments: [number, number][]) => void
   updateSegment: (index: number, newStart: number, newEnd: number) => void
@@ -59,6 +62,7 @@ interface AppState {
   setPlayingCueId: (cueId: string | null) => void
   setShowControls: (show: boolean) => void
   updateCueInProject: (cueId: string, curated: Partial<CuratedAttributes>) => void
+  updateCueContext: (cueId: string, contextUpdate: Partial<ProjectContextCue>) => void
   reset: () => void
   resetToSegmentation: () => void
 }
@@ -70,13 +74,14 @@ const initialState = {
   fileName: null,
   startTimecode: '01:00:00:00',
   framerate: 24,
+  mixType: 'clean_mx' as MixType,  // Default to Clean MX (music only)
   segments: [],
   selectedSegments: [],
   duration: 0,
   musicThreshold: 0.01,
   minGap: 3.0,
   minCueLength: 3.0,
-  silenceThreshold: 0.01,
+  silenceThreshold: 0.0005,  // Very low for Clean MX (music-only files)
   isSegmenting: false,
   isAnalyzing: false,
   analysisProgress: 0,
@@ -102,6 +107,9 @@ export const useAppStore = create<AppState>((set) => ({
 
   setFramerate: (fps) =>
     set({ framerate: fps }),
+
+  setMixType: (mixType) =>
+    set({ mixType }),
 
   setSegments: (segments, duration) =>
     set({ segments, duration, selectedSegments: [...segments] }),
@@ -232,6 +240,23 @@ export const useAppStore = create<AppState>((set) => ({
               musical_profile: {
                 ...cue.musical_profile,
                 curated: { ...cue.musical_profile.curated, ...curated },
+              },
+            }
+          : cue
+      )
+      return { project: { ...state.project, cues: updatedCues } }
+    }),
+
+  updateCueContext: (cueId, contextUpdate) =>
+    set((state) => {
+      if (!state.project) return state
+      const updatedCues = state.project.cues.map((cue) =>
+        cue.id === cueId
+          ? {
+              ...cue,
+              project_context: {
+                ...cue.project_context,
+                ...contextUpdate,
               },
             }
           : cue

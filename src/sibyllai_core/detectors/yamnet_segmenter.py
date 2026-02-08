@@ -6,6 +6,28 @@ import tensorflow_hub as hub
 import soundfile as sf
 import pandas as pd
 
+_yamnet_model = None
+_class_names = None
+
+
+def _ensure_class_map() -> str:
+    class_map_url = "https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv"
+    class_map_path = os.path.join(os.path.dirname(__file__), "yamnet_class_map.csv")
+    if not os.path.exists(class_map_path):
+        import urllib.request
+        urllib.request.urlretrieve(class_map_url, class_map_path)
+    return class_map_path
+
+
+def _load_yamnet():
+    global _yamnet_model, _class_names
+    if _yamnet_model is None:
+        _yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
+    if _class_names is None:
+        class_map_path = _ensure_class_map()
+        _class_names = pd.read_csv(class_map_path)["display_name"].tolist()
+    return _yamnet_model, _class_names
+
 def extract_audio(input_path, output_path):
     input_path = str(input_path)
     output_path = str(output_path)
@@ -18,24 +40,23 @@ def extract_audio(input_path, output_path):
     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return output_path
 
-def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0, silence_thresh=0.01):
+def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0, silence_thresh=0.01, use_yamnet=True):
     """
     Returns a list of (start_time, end_time) tuples for detected music regions in the audio file.
+
+    Args:
+        audio_path: Path to audio file
+        music_thresh: YAMNet music probability threshold (only used when use_yamnet=True)
+        min_gap: Minimum gap in seconds to split segments
+        silence_thresh: RMS amplitude threshold (used for trimming, or as main threshold when use_yamnet=False)
+        use_yamnet: If True, use YAMNet music classification (for full mix with dialogue/SFX).
+                    If False, use simple amplitude detection (for clean MX, music-only files).
     """
     tmp_handle = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     temp_wav = tmp_handle.name
     tmp_handle.close()
     wav_path = extract_audio(audio_path, temp_wav)
-    yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
-    # Load class map from the same directory as this file
-    import pandas as pd
-    class_map_url = "https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv"
-    class_map_path = os.path.join(os.path.dirname(__file__), "yamnet_class_map.csv")
-    if not os.path.exists(class_map_path):
-        import urllib.request
-        urllib.request.urlretrieve(class_map_url, class_map_path)
-    class_names = pd.read_csv(class_map_path)["display_name"].tolist()
-    music_idx = class_names.index("Music")
+
     # Load audio
     waveform, sr = sf.read(wav_path)
     if len(waveform.shape) > 1:
@@ -43,12 +64,29 @@ def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0, silence_thr
     if sr != 16000:
         import librosa
         waveform = librosa.resample(waveform, orig_sr=sr, target_sr=16000)
+        sr = 16000
     waveform = waveform.astype(np.float32)
-    # Run YAMNet
-    scores, _, _ = yamnet_model(waveform)
-    music_probs = scores[:, music_idx].numpy()
-    frame_hop_s = 0.48
-    frame_times = np.arange(len(music_probs)) * frame_hop_s
+
+    if use_yamnet:
+        # Full Mix mode: Use YAMNet to classify music vs dialogue/SFX
+        yamnet_model, class_names = _load_yamnet()
+        music_idx = class_names.index("Music")
+        scores, _, _ = yamnet_model(waveform)
+        probs = scores[:, music_idx].numpy()
+        threshold = music_thresh
+        frame_hop_s = 0.48
+    else:
+        # Clean MX mode: Use simple amplitude detection (faster, no ML model)
+        frame_hop_s = 0.05  # 50ms windows for finer resolution
+        hop_samples = int(frame_hop_s * sr)
+        num_frames = len(waveform) // hop_samples
+        probs = np.array([
+            np.sqrt(np.mean(waveform[i*hop_samples:(i+1)*hop_samples] ** 2))
+            for i in range(num_frames)
+        ])
+        threshold = silence_thresh
+
+    frame_times = np.arange(len(probs)) * frame_hop_s
     # Segment logic
     def get_segments(probs, threshold, frame_times):
         above = probs > threshold
@@ -75,44 +113,42 @@ def segment_music_regions(audio_path, music_thresh=0.2, min_gap=1.0, silence_thr
             else:
                 merged.append((start, end))
         return merged
-    music_segments = get_segments(music_probs, music_thresh, frame_times)
-    music_segments = merge_close_segments(music_segments, min_gap=min_gap)
+    segments = get_segments(probs, threshold, frame_times)
+    segments = merge_close_segments(segments, min_gap=min_gap)
 
-    # Add padding to compensate for frame granularity (~0.48s)
-    # Extend each segment by 0.5s at start and end to capture missed audio
-    PADDING = 0.5
-    music_segments = [(max(0, start - PADDING), end + PADDING) for start, end in music_segments]
+    if use_yamnet:
+        # YAMNet mode: Add padding to compensate for frame granularity (~0.48s)
+        PADDING = 0.5
+        segments = [(max(0, start - PADDING), end + PADDING) for start, end in segments]
 
-    # Trim silence from segment starts using amplitude threshold
-    # This prevents segments starting at 0 when there's actual silence
-    def trim_silence_start(waveform, sr, start, end, amp_thresh, hop_size=0.05):
-        """Trim silence from the start of a segment based on RMS amplitude."""
-        start_sample = int(start * sr)
-        end_sample = int(end * sr)
-        hop_samples = int(hop_size * sr)
+        # Trim silence from segment starts using amplitude threshold
+        def trim_silence_start(waveform, sr, start, end, amp_thresh, hop_size=0.05):
+            """Trim silence from the start of a segment based on RMS amplitude."""
+            start_sample = int(start * sr)
+            end_sample = int(end * sr)
+            hop_samples = int(hop_size * sr)
 
-        # Check amplitude in small windows from segment start
-        for i in range(start_sample, min(end_sample, start_sample + int(2 * sr)), hop_samples):
-            window = waveform[i:i + hop_samples]
-            if len(window) > 0:
-                rms = np.sqrt(np.mean(window ** 2))
-                if rms > amp_thresh:
-                    # Found audio - return this position
-                    return i / sr
-        # No significant audio found in first 2 seconds, return original start
-        return start
+            for i in range(start_sample, min(end_sample, start_sample + int(2 * sr)), hop_samples):
+                window = waveform[i:i + hop_samples]
+                if len(window) > 0:
+                    rms = np.sqrt(np.mean(window ** 2))
+                    if rms > amp_thresh:
+                        return i / sr
+            return start
 
-    # Apply silence trimming to each segment
-    trimmed_segments = []
-    for start, end in music_segments:
-        trimmed_start = trim_silence_start(waveform, 16000, start, end, silence_thresh)
-        trimmed_segments.append((trimmed_start, end))
-    music_segments = trimmed_segments
+        # Apply silence trimming to each segment
+        trimmed_segments = []
+        for start, end in segments:
+            trimmed_start = trim_silence_start(waveform, 16000, start, end, silence_thresh)
+            trimmed_segments.append((trimmed_start, end))
+        segments = trimmed_segments
+
+    # Clean MX mode: no padding or silence trimming needed (already amplitude-based)
 
     # Clean up temp file if created
     if wav_path == temp_wav and os.path.exists(temp_wav):
         os.remove(temp_wav)
-    return music_segments
+    return segments
 
 
 # Instrument class indices from YAMNet's 521 classes
@@ -150,18 +186,7 @@ def extract_instruments(audio_data, sr=16000, top_n=5):
         Dictionary mapping instrument name to confidence score:
         {"Piano": 0.89, "String section": 0.76, "Drum kit": 0.65}
     """
-    # Load YAMNet model
-    yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
-
-    # Load class map
-    class_map_path = os.path.join(os.path.dirname(__file__), "yamnet_class_map.csv")
-    if not os.path.exists(class_map_path):
-        class_map_url = "https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv"
-        import urllib.request
-        urllib.request.urlretrieve(class_map_url, class_map_path)
-
-    class_names_df = pd.read_csv(class_map_path)
-    class_names = class_names_df["display_name"].tolist()
+    yamnet_model, class_names = _load_yamnet()
 
     # Build instrument index map
     instrument_indices = {}
@@ -222,18 +247,7 @@ def extract_genres(audio_data, sr=16000, top_n=5):
         Dictionary mapping genre name to confidence score:
         {"Pop music": 0.45, "Electronic music": 0.32, "Rock music": 0.18}
     """
-    # Load YAMNet model
-    yamnet_model = hub.load("https://tfhub.dev/google/yamnet/1")
-
-    # Load class map
-    class_map_path = os.path.join(os.path.dirname(__file__), "yamnet_class_map.csv")
-    if not os.path.exists(class_map_path):
-        class_map_url = "https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv"
-        import urllib.request
-        urllib.request.urlretrieve(class_map_url, class_map_path)
-
-    class_names_df = pd.read_csv(class_map_path)
-    class_names = class_names_df["display_name"].tolist()
+    yamnet_model, class_names = _load_yamnet()
 
     # Genre-related keywords from YAMNet classes (indices 211-269 are mostly genres)
     genre_keywords = [

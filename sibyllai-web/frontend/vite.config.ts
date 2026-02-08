@@ -14,12 +14,12 @@ export default defineConfig({
     port: 5174,
     proxy: {
       '/api': {
-        // Backend port (8002 to avoid conflict with kazen on 8001)
-        target: 'http://localhost:8002',
+        // Backend port (8003 to avoid conflict with other apps)
+        target: 'http://localhost:8003',
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8002',
+        target: 'ws://localhost:8003',
         ws: true,
       },
     },

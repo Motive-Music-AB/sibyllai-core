@@ -148,6 +148,8 @@ export function CueCard({ cue, index }: CueCardProps) {
   const displayInstruments = (localCurated.instruments?.slice(0, 6) || []).map(toTitleCase)
   const displayGenres = (localCurated.genres?.slice(0, 2) || localCurated.genre?.slice(0, 2) || []).map(toTitleCase)
   const displayStyles = (localCurated.style?.slice(0, 2) || []).map(toTitleCase)
+  const cueStatus = cue.project_context?.status
+  const isMatched = cueStatus === 'matched'
 
   return (
     <Card
@@ -164,6 +166,11 @@ export function CueCard({ cue, index }: CueCardProps) {
         <div className="flex items-center gap-3">
           <span className="text-lg font-medium font-display">Cue {index + 1}</span>
           <span className="text-sm text-foreground-muted font-mono">{cue.start_tc} - {cue.end_tc}</span>
+          {isMatched && (
+            <span className="text-xs uppercase tracking-wide px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+              Matched
+            </span>
+          )}
           {isPlaying && (
             <span className="flex items-center gap-0.5 ml-2">
               <span className="w-1 h-3 bg-primary rounded-full animate-[soundbar_0.5s_ease-in-out_infinite_alternate]" style={{ animationDelay: '0ms' }} />

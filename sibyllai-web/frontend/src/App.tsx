@@ -6,6 +6,7 @@ import { AnalyzeButton } from '@/components/AnalyzeButton'
 import { CueCard } from '@/components/CueCard'
 import { DebugConsole } from '@/components/DebugConsole'
 import { CueSynch } from '@/components/CueSynch'
+import { TrackReplacement } from '@/components/TrackReplacement'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 
@@ -23,6 +24,16 @@ function App() {
           <div className="flex items-center justify-between">
             <div className="flex-1 flex justify-start">
               {currentPage === 'cuesynch' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage('analysis')}
+                  className="glass-lighter hover:bg-primary/20 border-primary/20 transition-all duration-300"
+                >
+                  ← Back
+                </Button>
+              )}
+              {currentPage === 'replacement' && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -52,7 +63,7 @@ function App() {
               </p>
             </div>
             <div className="flex-1 flex justify-end">
-              {((currentPage === 'analysis' && fileId && !project) || currentPage === 'cuesynch') && (
+              {((currentPage === 'analysis' && fileId && !project) || currentPage === 'cuesynch' || currentPage === 'replacement') && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -100,13 +111,23 @@ function App() {
                             {project.cues.length} cues analyzed - Click cues above or cards below to navigate
                           </p>
                         </div>
-                        <Button
-                          size="sm"
-                          onClick={() => setCurrentPage('cuesynch')}
-                          className="btn-primary px-6"
-                        >
-                          Export to DAW or NLE
-                        </Button>
+                        <div className="flex items-center gap-3">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setCurrentPage('replacement')}
+                            className="glass-lighter border-primary/20"
+                          >
+                            Track Replacement
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => setCurrentPage('cuesynch')}
+                            className="btn-primary px-6"
+                          >
+                            Export to DAW or NLE
+                          </Button>
+                        </div>
                       </div>
 
                       {/* Cue Cards */}
@@ -120,9 +141,13 @@ function App() {
                 </div>
               )}
             </div>
-          ) : (
+          ) : currentPage === 'cuesynch' ? (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
               <CueSynch />
+            </div>
+          ) : (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <TrackReplacement />
             </div>
           )}
         </main>

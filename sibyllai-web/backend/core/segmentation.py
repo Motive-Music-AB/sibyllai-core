@@ -1,4 +1,4 @@
-"""Fast segmentation module - YAMNet only (Phase 1)."""
+"""Fast segmentation module - YAMNet or volume-based (Phase 1)."""
 from __future__ import annotations
 import subprocess
 import tempfile
@@ -26,27 +26,35 @@ def segment_only(
     music_thresh: float = 0.2,
     min_gap: float = 5.0,
     min_cue_length: float = 3.0,
-    silence_thresh: float = 0.01
+    silence_thresh: float = 0.01,
+    mix_type: str = "full_mix",
 ) -> tuple[list[tuple[float, float]], float]:
     """
-    Fast segmentation using YAMNet only.
+    Fast segmentation using YAMNet (full_mix) or volume-based (clean_mx).
 
     Args:
         audio_path: Path to audio or video file
-        music_thresh: YAMNet music probability threshold (0-1)
+        music_thresh: YAMNet music probability threshold (0-1) - only used for full_mix
         min_gap: Minimum gap in seconds to keep segments separate
         min_cue_length: Minimum cue length in seconds (shorter cues filtered out)
-        silence_thresh: RMS amplitude threshold for silence trimming (0-1)
+        silence_thresh: RMS amplitude threshold (0-1) - main threshold for clean_mx
+        mix_type: "clean_mx" for music-only files (volume detection),
+                  "full_mix" for full film mix (YAMNet music classification)
 
     Returns:
         Tuple of (segments, duration) where segments is [(start, end), ...]
     """
-    # Extract audio for YAMNet
     wav_path = extract_audio_fast(audio_path)
+    use_yamnet = (mix_type != "clean_mx")
 
     try:
-        # Run YAMNet segmentation with silence trimming
-        segments = segment_music_regions(wav_path, music_thresh, min_gap, silence_thresh)
+        segments = segment_music_regions(
+            wav_path,
+            music_thresh=music_thresh,
+            min_gap=min_gap,
+            silence_thresh=silence_thresh,
+            use_yamnet=use_yamnet,
+        )
 
         # Filter segments by minimum cue length
         segments = [(start, end) for start, end in segments if (end - start) >= min_cue_length]

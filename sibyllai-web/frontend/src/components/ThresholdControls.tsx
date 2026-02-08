@@ -5,13 +5,21 @@ import { Slider } from '@/components/ui/slider'
 import { useAppStore } from '@/lib/store'
 import { api } from '@/lib/api'
 
+// Default thresholds for each mix type
+const MIX_TYPE_DEFAULTS = {
+  clean_mx: { musicThreshold: 0.5, silenceThreshold: 0.0005 },  // Very low threshold - any audio is music
+  full_mix: { musicThreshold: 0.2, silenceThreshold: 0.01 },    // Higher threshold to detect music among dialogue/SFX
+}
+
 export function ThresholdControls() {
   const {
     fileId,
+    mixType,
     musicThreshold,
     minGap,
     minCueLength,
     silenceThreshold,
+    setMixType,
     setMusicThreshold,
     setMinGap,
     setMinCueLength,
@@ -43,6 +51,7 @@ export function ThresholdControls() {
         min_gap: localMinGap,
         min_cue_length: localMinCueLength,
         silence_thresh: localSilenceThreshold,
+        mix_type: mixType,
       })
       setSegments(response.segments, response.duration)
     } catch (err) {
@@ -63,6 +72,57 @@ export function ThresholdControls() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
+        {/* Mix Type Selector */}
+        <div className="space-y-2">
+          <label className="text-sm font-bold tracking-tight text-foreground">
+            Source Type
+          </label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setMixType('clean_mx')
+                setLocalThreshold(MIX_TYPE_DEFAULTS.clean_mx.musicThreshold)
+                setLocalSilenceThreshold(MIX_TYPE_DEFAULTS.clean_mx.silenceThreshold)
+              }}
+              disabled={isSegmenting}
+              className={`relative group flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-all text-sm ${
+                mixType === 'clean_mx'
+                  ? 'border-primary bg-primary/10 text-primary font-medium'
+                  : 'border-white/10 hover:border-white/20 text-foreground-muted hover:text-foreground'
+              }`}
+            >
+              <span>🎵</span>
+              <span>Clean MX</span>
+              {/* Tooltip */}
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-background border border-white/20 rounded-lg text-xs text-foreground whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                Music Only — isolated music stems
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMixType('full_mix')
+                setLocalThreshold(MIX_TYPE_DEFAULTS.full_mix.musicThreshold)
+                setLocalSilenceThreshold(MIX_TYPE_DEFAULTS.full_mix.silenceThreshold)
+              }}
+              disabled={isSegmenting}
+              className={`relative group flex items-center justify-center gap-2 px-3 py-2 rounded-lg border transition-all text-sm ${
+                mixType === 'full_mix'
+                  ? 'border-primary bg-primary/10 text-primary font-medium'
+                  : 'border-white/10 hover:border-white/20 text-foreground-muted hover:text-foreground'
+              }`}
+            >
+              <span>🎬</span>
+              <span>Full Mix</span>
+              {/* Tooltip */}
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-background border border-white/20 rounded-lg text-xs text-foreground whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                Full Film Mix — includes DIA, SFX, etc.
+              </div>
+            </button>
+          </div>
+        </div>
+
         <div className="flex flex-col gap-3">
           <Button
             onClick={handlePreview}
@@ -105,15 +165,15 @@ export function ThresholdControls() {
                   </p>
                 </div>
                 <span className="glass-lighter px-3 py-1 rounded-lg font-mono font-bold text-xs text-primary border border-primary/20">
-                  {localSilenceThreshold < 0.001 ? localSilenceThreshold.toFixed(4) : localSilenceThreshold.toFixed(3)}
+                  {localSilenceThreshold < 0.01 ? localSilenceThreshold.toFixed(4) : localSilenceThreshold.toFixed(3)}
                 </span>
               </div>
               <Slider
                 value={[localSilenceThreshold]}
                 onValueChange={([value]) => setLocalSilenceThreshold(value)}
-                min={0.001}
+                min={0.0001}
                 max={0.1}
-                step={0.001}
+                step={0.0001}
                 disabled={isSegmenting}
                 className="py-2"
               />

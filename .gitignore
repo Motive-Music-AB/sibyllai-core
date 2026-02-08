@@ -51,3 +51,9 @@ src/sibyllai_core/thirdparty/music2emo/dataset/*/
 *.mov
 .DS_Store
 .cursor/
+
+# Local experiments and generated outputs
+/outputs/
+/DeepFilterNet/
+/sibyllai-web/backend/temp/
+/sibyllai-web/backend/api/temp/

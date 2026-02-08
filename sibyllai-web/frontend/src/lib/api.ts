@@ -9,6 +9,14 @@ import type {
   SibylProject,
   CueUpdateRequest,
   CueUpdateResponse,
+  LibraryBuildRequest,
+  LibraryBuildResponse,
+  LibraryBuildStatus,
+  LibraryMatchRequest,
+  LibraryMatchResponse,
+  LibraryInfo,
+  CueReplacementRequest,
+  CueReplacementResponse,
 } from './types'
 
 const API_BASE = '/api'
@@ -81,6 +89,81 @@ export const api = {
       `${API_BASE}/projects/${sessionId}/cues/${cueId}`,
       update
     )
+    return response.data
+  },
+
+  /**
+   * Build library index from a folder of audio files
+   */
+  async buildLibraryIndex(request: LibraryBuildRequest): Promise<LibraryBuildResponse> {
+    const response = await axios.post<LibraryBuildResponse>(`${API_BASE}/library/build`, request)
+    return response.data
+  },
+
+  /**
+   * Build library index by uploading a folder from the client
+   */
+  async buildLibraryIndexUpload(
+    files: File[],
+    includeMoods: boolean,
+    reset: boolean
+  ): Promise<LibraryBuildResponse> {
+    const formData = new FormData()
+    for (const file of files) {
+      // Preserve relative path when available (webkitRelativePath)
+      const relPath = (file as File & { webkitRelativePath?: string }).webkitRelativePath
+      formData.append('files', file, relPath || file.name)
+    }
+    formData.append('include_moods', includeMoods ? 'true' : 'false')
+    formData.append('reset', reset ? 'true' : 'false')
+    formData.append('dedupe_simple', 'true')
+
+    const response = await axios.post<LibraryBuildResponse>(`${API_BASE}/library/build-upload`, formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    })
+    return response.data
+  },
+
+  /**
+   * Get library build status
+   */
+  async getLibraryBuildStatus(jobId: string): Promise<LibraryBuildStatus> {
+    const response = await axios.get<LibraryBuildStatus>(`${API_BASE}/library/status/${jobId}`)
+    return response.data
+  },
+
+  /**
+   * Match a cue to the library index
+   */
+  async matchLibrary(request: LibraryMatchRequest): Promise<LibraryMatchResponse> {
+    const response = await axios.post<LibraryMatchResponse>(`${API_BASE}/library/match`, request)
+    return response.data
+  },
+
+  /**
+   * Persist replacement selection for a cue
+   */
+  async updateCueReplacement(
+    sessionId: string,
+    cueId: string,
+    update: CueReplacementRequest
+  ): Promise<CueReplacementResponse> {
+    const response = await axios.put<CueReplacementResponse>(
+      `${API_BASE}/projects/${sessionId}/cues/${cueId}/replacement`,
+      update
+    )
+    return response.data
+  },
+
+  /**
+   * Get library index info (if it exists)
+   */
+  async getLibraryInfo(dbPath?: string): Promise<LibraryInfo> {
+    const response = await axios.get<LibraryInfo>(`${API_BASE}/library/info`, {
+      params: dbPath ? { db_path: dbPath } : undefined,
+    })
     return response.data
   },
 }
