@@ -175,3 +175,6 @@ dev = [
   "pytest",          # ← tests
   "ruff",            # ← lint
 ]
+
+[tool.ruff]
+exclude = ["src/sibyllai_core/thirdparty/"]

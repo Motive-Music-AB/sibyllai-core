@@ -1,13 +1,15 @@
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow INFO and WARNING logs
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # (Optional) Suppress some additional TF logs
-import warnings
+import argparse  # noqa: E402
+import pathlib  # noqa: E402
+import warnings  # noqa: E402
+
 warnings.filterwarnings('ignore', category=UserWarning, module='keras')
 
-print("=== CLI MODULE LOADED (DEBUG) ===")
+from .pipeline import analyse  # noqa: E402
 
-import argparse, pathlib, os
-from .pipeline import analyse
+print("=== CLI MODULE LOADED (DEBUG) ===")
 
 DEFAULT_OUT = pathlib.Path(__file__).resolve().parents[2] / "outputs"  # repo/outputs
 

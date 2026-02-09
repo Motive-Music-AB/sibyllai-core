@@ -1,10 +1,6 @@
 import numpy as np
 import librosa
-import torch
-import os
-import tempfile
-import soundfile as sf
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, Tuple
 from essentia.standard import KeyExtractor
 
 # Chord vocabulary definitions
