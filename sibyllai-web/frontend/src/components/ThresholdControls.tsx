@@ -59,7 +59,7 @@ export function ThresholdControls() {
     } finally {
       setIsSegmenting(false)
     }
-  }, [fileId, localThreshold, localMinGap, localMinCueLength, localSilenceThreshold, setSegments, setIsSegmenting, setMusicThreshold, setMinGap, setMinCueLength, setSilenceThreshold])
+  }, [fileId, localThreshold, localMinGap, localMinCueLength, localSilenceThreshold, mixType, setSegments, setIsSegmenting, setMusicThreshold, setMinGap, setMinCueLength, setSilenceThreshold])
 
   if (!fileId) return null
 

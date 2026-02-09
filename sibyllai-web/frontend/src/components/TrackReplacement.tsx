@@ -134,7 +134,7 @@ export function TrackReplacement() {
     return () => {
       if (interval) window.clearInterval(interval)
     }
-  }, [buildJobId, buildStatus])
+  }, [buildJobId, buildStatus, libraryFolderName])
 
   const handleBuildIndex = async () => {
     if (libraryFiles.length === 0) {
