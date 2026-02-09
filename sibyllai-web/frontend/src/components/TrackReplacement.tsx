@@ -307,7 +307,6 @@ export function TrackReplacement() {
             className="hidden"
             // @ts-expect-error webkitdirectory is non-standard but supported in Chromium
             webkitdirectory="true"
-            // @ts-expect-error directory is non-standard
             directory=""
             onChange={(e) => {
               const files = Array.from(e.target.files || [])

@@ -225,7 +225,7 @@ export function WaveformViewer() {
     if (!project?.cues) return null
     return project.cues.find((cue) =>
       Math.abs(cue.start - start) < 0.01 && Math.abs(cue.end - end) < 0.01
-    )
+    ) ?? null
   }, [project])
 
   // Helper to set active cue (only used after analysis)
@@ -467,10 +467,14 @@ export function WaveformViewer() {
 
             // Only show context menu before analysis
             if (!project) {
+              const rect = waveformRef.current?.getBoundingClientRect()
+              const duration = wavesurferRef.current?.getDuration() ?? 0
+              const clickTime = rect ? (e.clientX - rect.left) / rect.width * duration : start
               setContextMenu({
                 x: e.clientX,
                 y: e.clientY,
                 segmentIndex: actualIndex,
+                splitTime: clickTime,
               })
             }
           } else {
