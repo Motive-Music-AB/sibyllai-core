@@ -8,7 +8,6 @@ import uuid
 import asyncio
 from typing import Optional
 import shutil
-import threading
 from concurrent.futures import ThreadPoolExecutor
 
 # Add sibyllai_core and sibyllai_web to path
