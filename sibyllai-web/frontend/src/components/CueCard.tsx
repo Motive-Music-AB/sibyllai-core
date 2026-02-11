@@ -155,11 +155,11 @@ export function CueCard({ cue, index }: CueCardProps) {
     <Card
       ref={cardRef}
       onClick={handleClick}
-      className={`p-4 cursor-pointer transition-all ${
-        isActive
-          ? 'border-primary border-2 shadow-lg'
-          : 'border hover:border-primary/40'
-      }`}
+      className="p-4 cursor-pointer transition-all glass"
+      style={isActive ? {
+        border: '2px solid rgba(232, 148, 58, 0.7)',
+        boxShadow: '0 0 12px rgba(232, 148, 58, 0.3)',
+      } : undefined}
     >
       {/* Header row */}
       <div className="flex items-center justify-between mb-3">
@@ -187,34 +187,36 @@ export function CueCard({ cue, index }: CueCardProps) {
       </div>
 
       {/* Compact info grid */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-        <div className="flex items-center gap-2">
-          <span className="text-foreground-muted text-xs uppercase tracking-wide">BPM</span>
-          <span className="font-medium">
-            {typeof cue.musical_profile.bpm === 'number'
-              ? Math.round(cue.musical_profile.bpm)
-              : cue.musical_profile.bpm || '—'}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-foreground-muted text-xs uppercase tracking-wide">Key</span>
-          <span className="font-medium">{cue.musical_profile.key || '—'}</span>
-        </div>
-        {displayGenres.length > 0 && (
+      <div className="space-y-2 text-sm">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
           <div className="flex items-center gap-2">
-            <span className="text-foreground-muted text-xs uppercase tracking-wide">Genre</span>
-            <span className="font-medium">{displayGenres.join(', ')}</span>
+            <span className="text-foreground-muted text-xs uppercase tracking-wide">BPM</span>
+            <span className="font-medium">
+              {typeof cue.musical_profile.bpm === 'number'
+                ? Math.round(cue.musical_profile.bpm)
+                : cue.musical_profile.bpm || '—'}
+            </span>
           </div>
-        )}
-        {displayStyles.length > 0 && (
           <div className="flex items-center gap-2">
-            <span className="text-foreground-muted text-xs uppercase tracking-wide">Style</span>
-            <span className="font-medium">{displayStyles.join(', ')}</span>
+            <span className="text-foreground-muted text-xs uppercase tracking-wide">Key</span>
+            <span className="font-medium">{cue.musical_profile.key || '—'}</span>
           </div>
-        )}
+          {displayGenres.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-foreground-muted text-xs uppercase tracking-wide">Genre</span>
+              <span className="font-medium">{displayGenres.join(', ')}</span>
+            </div>
+          )}
+          {displayStyles.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-foreground-muted text-xs uppercase tracking-wide">Style</span>
+              <span className="font-medium">{displayStyles.join(', ')}</span>
+            </div>
+          )}
+        </div>
         {displayInstruments.length > 0 && (
-          <div className="flex items-center gap-2">
-            <span className="text-foreground-muted text-xs uppercase tracking-wide">Instruments</span>
+          <div className="flex items-start gap-2">
+            <span className="text-foreground-muted text-xs uppercase tracking-wide shrink-0 mt-0.5">Instruments</span>
             <span className="font-medium">{displayInstruments.join(', ')}</span>
           </div>
         )}

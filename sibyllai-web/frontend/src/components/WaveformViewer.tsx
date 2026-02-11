@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin, { type Region } from 'wavesurfer.js/dist/plugins/regions'
 import { Card, CardContent } from '@/components/ui/card'
@@ -70,6 +71,10 @@ export function WaveformViewer() {
     setPlayingCueId,
     startTimecode,
     framerate,
+    currentPage,
+    setCurrentPage,
+    resetToSegmentation,
+    reset,
   } = useAppStore()
 
   // Initialize WaveSurfer
@@ -82,11 +87,12 @@ export function WaveformViewer() {
     // Create WaveSurfer instance
     const ws = WaveSurfer.create({
       container: waveformRef.current,
-      waveColor: 'rgba(200, 130, 80, 0.6)',
-      progressColor: 'rgb(232, 148, 58)',
-      cursorColor: 'rgb(232, 148, 58)',
-      barWidth: 2,
+      waveColor: ['#FFF2D9', '#F5B85A', '#E8943A'],
+      progressColor: ['#FFFAF0', '#FFD080', '#F0A54A'],
+      cursorColor: '#E8943A',
+      barWidth: 3,
       barGap: 1,
+      barRadius: 2,
       height: 180,
       normalize: true,
     })
@@ -397,12 +403,16 @@ export function WaveformViewer() {
 
       // Determine color based on state
       let color: string
-      if (isActive) {
+      if (project && !cue) {
+        color = 'rgba(40, 40, 40, 0.6)' // Greyed out for unanalyzed segments
+      } else if (isActive) {
         color = 'rgba(59, 130, 246, 0.5)' // Bright blue for active
+      } else if (project && cue) {
+        color = 'rgba(232, 148, 58, 0.08)' // Subtle warm tint for analyzed cues
       } else if (selected) {
-        color = 'rgba(34, 197, 94, 0.3)' // Green for selected
+        color = 'rgba(34, 197, 94, 0.25)' // Green for selected
       } else {
-        color = 'rgba(148, 163, 184, 0.2)' // Light gray for unselected
+        color = 'rgba(40, 40, 40, 0.5)' // Greyed out for unselected
       }
 
       // Enable dragging/resizing only before analysis
@@ -424,42 +434,41 @@ export function WaveformViewer() {
         region.element.style.borderRight = '2px solid rgba(100, 116, 139, 0.6)'
         region.element.style.boxSizing = 'border-box'
 
-        // Create and add select button programmatically
-        const button = document.createElement('button')
-        button.className = 'region-select-btn'
-        button.textContent = selected ? '✓' : 'Select'
-        button.style.cssText = `
-          position: absolute;
-          top: 4px;
-          right: 4px;
-          padding: 2px 8px;
-          font-size: 11px;
-          font-weight: 500;
-          border: none;
-          border-radius: 3px;
-          cursor: pointer;
-          z-index: 10;
-          background-color: ${selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(148, 163, 184, 0.7)'};
-          color: white;
-          transition: background-color 0.2s;
-        `
+        // Create and add select button programmatically (only before analysis)
+        if (!project) {
+          const button = document.createElement('button')
+          button.className = 'region-select-btn'
+          button.textContent = selected ? '✓' : 'Select'
+          button.style.cssText = `
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            padding: 2px 8px;
+            font-size: 11px;
+            font-weight: 500;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            z-index: 10;
+            background-color: ${selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(148, 163, 184, 0.7)'};
+            color: white;
+            transition: background-color 0.2s;
+          `
 
-        // Add hover effects
-        button.addEventListener('mouseenter', () => {
-          button.style.opacity = '0.8'
-        })
-        button.addEventListener('mouseleave', () => {
-          button.style.opacity = '1'
-        })
+          button.addEventListener('mouseenter', () => {
+            button.style.opacity = '0.8'
+          })
+          button.addEventListener('mouseleave', () => {
+            button.style.opacity = '1'
+          })
 
-        // Add click handler for select button
-        button.addEventListener('click', (e) => {
-          e.stopPropagation() // Prevent region click
-          toggleSegmentSelectionRef.current(start, end)
-        })
+          button.addEventListener('click', (e) => {
+            e.stopPropagation()
+            toggleSegmentSelectionRef.current(start, end)
+          })
 
-        // Append button to region element
-        region.element.appendChild(button)
+          region.element.appendChild(button)
+        }
 
         // Click handler - use ref to get latest callback
         region.on('click', (e) => {
@@ -806,10 +815,33 @@ export function WaveformViewer() {
 
   return (
     <Card className="w-full border-white/10 shadow-none waveform-card">
-      <CardContent className="pt-6">
+      <CardContent className="pt-4">
         <div className="space-y-4">
+          {/* Nav toolbar */}
+          <div className="flex items-center justify-between">
+            <div>
+              {currentPage === 'analysis' && !project && (
+                <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
+                  ← Back
+                </Button>
+              )}
+              {currentPage === 'analysis' && project && (
+                <Button variant="outline" size="sm" onClick={resetToSegmentation} className="glass-lighter border-primary/20">
+                  ← Back
+                </Button>
+              )}
+              {(currentPage === 'cuesynch' || currentPage === 'replacement' || currentPage === 'licensing') && (
+                <Button variant="outline" size="sm" onClick={() => setCurrentPage('analysis')} className="glass-lighter border-primary/20">
+                  ← Back
+                </Button>
+              )}
+            </div>
+            <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
+              New Import
+            </Button>
+          </div>
           <div
-            className="overflow-x-auto rounded-lg bg-[rgba(30,20,15,0.6)] relative waveform-scroll-container"
+            className="overflow-x-auto rounded-lg bg-[hsla(0,0%,15%,0.35)] relative waveform-scroll-container"
           >
             {/* Zoom loading overlay */}
             {isZooming && (
@@ -848,7 +880,7 @@ export function WaveformViewer() {
                 return (
                   <div
                     ref={rulerRef}
-                    className="relative h-8 bg-[rgba(40,28,22,0.8)] border-b border-white/10"
+                    className="relative h-8 bg-[hsla(0,0%,15%,0.5)] border-b border-white/10"
                     style={{
                       width: zoom === 0 ? '100%' : `${displayWidth}px`,
                       minWidth: zoom === 0 ? '100%' : `${displayWidth}px`,
@@ -981,15 +1013,13 @@ export function WaveformViewer() {
             </div>
           )}
 
-          {/* Context Menu */}
-          {contextMenu && (
+          {/* Context Menu — portaled to body to escape contain:layout */}
+          {contextMenu && createPortal(
             <>
-              {/* Backdrop to close on click */}
               <div
                 className="fixed inset-0 z-40"
                 onClick={() => setContextMenu(null)}
               />
-
               <div
                 className="fixed glass border border-white/10 rounded-lg shadow-2xl py-1 z-50"
                 style={{
@@ -1013,19 +1043,17 @@ export function WaveformViewer() {
                   <span>Delete cue</span>
                 </button>
               </div>
-            </>
+            </>,
+            document.body
           )}
 
-          {/* Delete Confirmation Tooltip */}
-          {deleteConfirm && (
+          {/* Delete Confirmation — portaled to body to escape contain:layout */}
+          {deleteConfirm && createPortal(
             <>
-              {/* Backdrop to close on click */}
               <div
                 className="fixed inset-0 z-40"
                 onClick={() => setDeleteConfirm(null)}
               />
-
-              {/* Tooltip */}
               <div
                 className="fixed glass border border-white/10 rounded-lg shadow-2xl p-4 z-50"
                 style={{
@@ -1055,7 +1083,8 @@ export function WaveformViewer() {
                   </button>
                 </div>
               </div>
-            </>
+            </>,
+            document.body
           )}
         </div>
       </CardContent>

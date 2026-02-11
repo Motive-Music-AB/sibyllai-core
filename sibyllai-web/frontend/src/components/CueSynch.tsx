@@ -20,7 +20,7 @@ interface CueData {
 }
 
 export function CueSynch() {
-  const { project, fileName, framerate } = useAppStore()
+  const { project, fileName, framerate, setCurrentPage, reset } = useAppStore()
 
   const [file, setFile] = useState<File | null>(null)
   const [frameRateSetting] = useState<string>('auto')
@@ -192,9 +192,20 @@ export function CueSynch() {
 
   return (
     <div className="space-y-6">
+      {/* Nav toolbar */}
+      <div className="glass px-6 py-3 rounded-2xl flex items-center justify-between">
+        <Button variant="outline" size="sm" onClick={() => setCurrentPage('analysis')} className="glass-lighter border-primary/20">
+          ← Back
+        </Button>
+        <h2 className="text-lg font-medium font-display">Export to DAW or NLE</h2>
+        <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
+          New Import
+        </Button>
+      </div>
+
       {/* Data Source Info */}
       {hasAnalysisData && cueData && (
-        <div className="bg-card rounded-lg p-4 border">
+        <div className="glass rounded-2xl p-4">
           <p className="text-sm text-muted-foreground">
             Using {project.cues.length} cues from: <strong>{fileName}</strong>
           </p>
@@ -210,7 +221,7 @@ export function CueSynch() {
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
           onClick={() => fileInputRef.current?.click()}
-          className={`bg-card rounded-lg p-10 border-2 border-dashed transition-all cursor-pointer ${
+          className={`glass rounded-2xl p-10 border-2 border-dashed transition-all cursor-pointer ${
             file
               ? 'border-green-500'
               : 'border-muted-foreground/30 hover:border-primary'
@@ -265,7 +276,7 @@ export function CueSynch() {
 
       {/* Analyzing State */}
       {isAnalyzing && (
-        <div className="bg-card rounded-lg p-5 text-center">
+        <div className="glass rounded-2xl p-5 text-center">
           <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary mb-3"></div>
           <p className="text-muted-foreground text-sm">Analyzing CSV...</p>
         </div>
@@ -273,7 +284,7 @@ export function CueSynch() {
 
       {/* Field Selection */}
       {cueData && cueData.headers && (
-        <div className="bg-card rounded-lg p-4 border">
+        <div className="glass rounded-2xl p-4">
           <h2 className="font-medium mb-4">Configure Markers</h2>
 
           {/* Sample Rate Selection */}
@@ -369,7 +380,7 @@ export function CueSynch() {
 
       {/* Instructions */}
       {cueData && (
-        <div className="bg-card rounded-lg p-4 border">
+        <div className="glass rounded-2xl p-4">
           <h3 className="font-medium mb-3">Next Steps</h3>
           <ol className="space-y-2 text-sm text-muted-foreground">
             <li className="flex items-start">

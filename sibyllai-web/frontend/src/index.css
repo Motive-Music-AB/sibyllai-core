@@ -73,7 +73,7 @@
   /* -------------------------------------------------------------------------
      CARD SYSTEM (mapped for shadcn compatibility)
      ------------------------------------------------------------------------- */
-  --color-card: hsla(0, 0%, 22%, 0.78);
+  --color-card: hsla(0, 0%, 20%, 0.55);
   --color-card-foreground: #EDEDED;
 
   --color-popover: hsla(0, 0%, 16%, 0.92);
@@ -191,14 +191,8 @@ body::before {
 
 /* Cards get glass treatment */
 .card, [data-slot="card"] {
-  background: linear-gradient(
-    to bottom,
-    hsla(0, 0%, 24%, 0.15),
-    hsla(0, 0%, 18%, 0.25)
-  ) !important;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid hsl(0 0% 100% / 0.08) !important;
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
   box-shadow: var(--shadow-glass);
 }
 

@@ -8,7 +8,7 @@ import { LibraryManager } from '@/components/LibraryManager'
 import type { LibraryMatch } from '@/lib/types'
 
 export function TrackReplacement() {
-  const { project, fileName, sessionId, activeCueId, setActiveCueId, updateCueContext, setCurrentPage } = useAppStore()
+  const { project, fileName, sessionId, activeCueId, setActiveCueId, updateCueContext, setCurrentPage, reset, segments } = useAppStore()
 
   const cueCount = project?.cues.length ?? 0
   const cueOptions = useMemo(
@@ -219,7 +219,15 @@ export function TrackReplacement() {
   return (
     <div className="space-y-4">
       {/* Header with title and tabs */}
-      <div className="glass px-6 py-4 rounded-2xl">
+      <div className="glass px-6 py-4 rounded-2xl space-y-3">
+        <div className="flex items-center justify-between">
+          <Button variant="outline" size="sm" onClick={() => setCurrentPage('analysis')} className="glass-lighter border-primary/20">
+            ← Back
+          </Button>
+          <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
+            New Import
+          </Button>
+        </div>
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <h2 className="text-2xl font-medium font-display">Track Replacement</h2>
@@ -271,16 +279,19 @@ export function TrackReplacement() {
             <WaveformViewer />
           </div>
 
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-[45%_1fr_1fr] gap-6 items-start">
             <div className="glass p-6 rounded-2xl space-y-4">
               <div className="flex items-center justify-between">
                 <h3 className="text-lg font-medium font-display">Cues</h3>
                 <p className="text-sm text-foreground-muted">Click a cue card to set active cue.</p>
               </div>
-              <div className="grid gap-4 max-h-[520px] overflow-y-auto pr-1">
-                {project?.cues.map((cue, index) => (
-                  <CueCard key={cue.id} cue={cue} index={index} />
-                ))}
+              <div className="grid gap-4">
+                {[...(project?.cues ?? [])].sort((a, b) => a.start - b.start).map((cue) => {
+                  const segIndex = segments.findIndex(([s, e]) =>
+                    Math.abs(s - cue.start) < 0.5 && Math.abs(e - cue.end) < 0.5
+                  )
+                  return <CueCard key={cue.id} cue={cue} index={segIndex >= 0 ? segIndex : 0} />
+                })}
               </div>
             </div>
 
@@ -309,7 +320,7 @@ export function TrackReplacement() {
               {matches.length === 0 ? (
                 <p className="text-sm text-foreground-muted">No matches yet.</p>
               ) : (
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                <div className="space-y-2">
                   {matches.map((match, idx) => {
                     const matchFileName = match.track_path.replace(/\\/g, '/').split('/').pop()
                     const isFocused = selectedCueId ? focusedMatchId[selectedCueId] === match.window_id : false
@@ -372,68 +383,68 @@ export function TrackReplacement() {
               )}
             </div>
 
-            <div className="glass p-6 rounded-2xl space-y-4">
-              <div>
-                <h3 className="text-lg font-medium font-display mb-2">Details</h3>
-                <p className="text-sm text-foreground-muted">
-                  Compare the selected cue and the chosen match.
-                </p>
-              </div>
-              <div className="space-y-4 text-sm">
+            <div className="space-y-4">
+              <div className="glass p-6 rounded-2xl space-y-4">
                 <div>
-                  <div className="text-foreground-muted uppercase tracking-wide text-xs mb-2">Cue</div>
-                  <div className="flex flex-wrap gap-x-4 gap-y-1">
-                    <span>Length: {selectedCue ? formatSeconds(selectedCue.end - selectedCue.start) : '—'}</span>
-                    <span>BPM: {formatBpm(selectedCue?.musical_profile.bpm)}</span>
-                    <span>Key: {selectedCue?.musical_profile.key ?? '—'}</span>
-                  </div>
+                  <h3 className="text-lg font-medium font-display mb-2">Details</h3>
+                  <p className="text-sm text-foreground-muted">
+                    Compare the selected cue and the chosen match.
+                  </p>
                 </div>
-                <div>
-                  <div className="text-foreground-muted uppercase tracking-wide text-xs mb-2">Match</div>
-                  {focusedMatch ? (
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap gap-x-4 gap-y-1">
-                        <span>BPM: {formatBpm(focusedMatch.bpm)}</span>
-                        <span>Key: {focusedMatch.key ?? '—'}</span>
-                        <span>Score: {focusedMatch.score.toFixed(3)}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-x-4 gap-y-1">
-                        <span>Range: {focusedMatch.start.toFixed(1)}s–{focusedMatch.end.toFixed(1)}s</span>
-                        <span>Window: {focusedMatch.window_size}s</span>
-                      </div>
-                      {focusedMatch.genres && focusedMatch.genres.length > 0 && (
-                        <div className="text-foreground-muted">
-                          Genre: {focusedMatch.genres.join(', ')}
-                        </div>
-                      )}
-                      {focusedMatch.instruments && focusedMatch.instruments.length > 0 && (
-                        <div className="text-foreground-muted">
-                          Instruments: {focusedMatch.instruments.join(', ')}
-                        </div>
-                      )}
+                <div className="space-y-4 text-sm">
+                  <div>
+                    <div className="text-foreground-muted uppercase tracking-wide text-xs mb-2">Cue</div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      <span>Length: {selectedCue ? formatSeconds(selectedCue.end - selectedCue.start) : '—'}</span>
+                      <span>BPM: {formatBpm(selectedCue?.musical_profile.bpm)}</span>
+                      <span>Key: {selectedCue?.musical_profile.key ?? '—'}</span>
                     </div>
-                  ) : (
-                    <div className="text-foreground-muted">Select a match to see details</div>
+                  </div>
+                  <div>
+                    <div className="text-foreground-muted uppercase tracking-wide text-xs mb-2">Match</div>
+                    {focusedMatch ? (
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          <span>BPM: {formatBpm(focusedMatch.bpm)}</span>
+                          <span>Key: {focusedMatch.key ?? '—'}</span>
+                          <span>Score: {focusedMatch.score.toFixed(3)}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          <span>Range: {focusedMatch.start.toFixed(1)}s–{focusedMatch.end.toFixed(1)}s</span>
+                          <span>Window: {focusedMatch.window_size}s</span>
+                        </div>
+                        {focusedMatch.genres && focusedMatch.genres.length > 0 && (
+                          <div className="text-foreground-muted">
+                            Genre: {focusedMatch.genres.join(', ')}
+                          </div>
+                        )}
+                        {focusedMatch.instruments && focusedMatch.instruments.length > 0 && (
+                          <div className="text-foreground-muted">
+                            Instruments: {focusedMatch.instruments.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-foreground-muted">Select a match to see details</div>
+                    )}
+                  </div>
+                  {selectedCue?.project_context?.replacement && (
+                    <div className="text-xs text-foreground-muted">
+                      Applied: {selectedCue.project_context.replacement.track_path.split('/').pop()}
+                    </div>
                   )}
                 </div>
-                {selectedCue?.project_context?.replacement && (
-                  <div className="text-xs text-foreground-muted">
-                    Applied: {selectedCue.project_context.replacement.track_path.split('/').pop()}
-                  </div>
-                )}
               </div>
-            </div>
-          </div>
 
-          {/* Finalize button */}
-          <div className="flex justify-end">
-            <Button
-              className="btn-primary px-6"
-              onClick={() => setCurrentPage('licensing')}
-              disabled={!project?.cues.some((c) => c.project_context?.status === 'matched')}
-            >
-              Finalize Track Replacement →
-            </Button>
+              {/* Finalize button */}
+              <Button
+                className="btn-primary px-6 w-full"
+                onClick={() => setCurrentPage('licensing')}
+                disabled={!project?.cues.some((c) => c.project_context?.status === 'matched')}
+              >
+                Finalize Track Replacement →
+              </Button>
+            </div>
           </div>
         </>
       )}

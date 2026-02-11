@@ -42,7 +42,7 @@ function formatCurrency(amount: number): string {
 }
 
 export function LicensingPage() {
-  const { project, fileName, setCurrentPage } = useAppStore()
+  const { project, fileName, setCurrentPage, reset } = useAppStore()
 
   const [territory, setTerritory] = useState<Territory>('worldwide')
   const [period, setPeriod] = useState<TimePeriod>('perpetuity')
@@ -76,22 +76,20 @@ export function LicensingPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="glass px-6 py-4 rounded-2xl">
+      <div className="glass px-6 py-4 rounded-2xl space-y-3">
         <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-2xl font-medium font-display">Licensing & Download</h2>
-            <p className="text-sm text-foreground-muted">
-              {fileName ?? 'Project'} · {matchedCues.length} matched {matchedCues.length === 1 ? 'track' : 'tracks'}
-            </p>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setCurrentPage('replacement')}
-            className="glass-lighter hover:bg-primary/20 border-primary/20 transition-all duration-300"
-          >
-            ← Back to Track Replacement
+          <Button variant="outline" size="sm" onClick={() => setCurrentPage('replacement')} className="glass-lighter border-primary/20">
+            ← Back
           </Button>
+          <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
+            New Import
+          </Button>
+        </div>
+        <div>
+          <h2 className="text-2xl font-medium font-display">Licensing & Download</h2>
+          <p className="text-sm text-foreground-muted">
+            {fileName ?? 'Project'} · {matchedCues.length} matched {matchedCues.length === 1 ? 'track' : 'tracks'}
+          </p>
         </div>
       </div>
 
