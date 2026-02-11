@@ -7,6 +7,7 @@ import { CueCard } from '@/components/CueCard'
 import { DebugConsole } from '@/components/DebugConsole'
 import { CueSynch } from '@/components/CueSynch'
 import { TrackReplacement } from '@/components/TrackReplacement'
+import { LicensingPage } from '@/components/LicensingPage'
 import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 
@@ -55,15 +56,15 @@ function App() {
               )}
             </div>
             <div className="text-center group">
-              <h1 className="text-[78px] font-semibold tracking-tight font-display -mb-2 bg-gradient-to-b from-white to-foreground/40 bg-clip-text text-transparent group-hover:from-primary group-hover:to-primary/40 transition-all duration-500 cursor-default">
+              <h1 className="text-[78px] font-semibold tracking-tight font-display -mb-2 bg-gradient-to-b from-white to-white/60 bg-clip-text text-transparent group-hover:from-primary group-hover:to-primary/40 transition-all duration-500 cursor-default" style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.5))' }}>
                 Motive
               </h1>
-              <p className="text-foreground-muted font-medium tracking-[0.25em] uppercase text-xs">
+              <p className="text-white/80 font-medium tracking-[0.25em] uppercase text-xs" style={{ textShadow: '0 1px 6px rgba(0,0,0,0.6)' }}>
                 Music Analysis for Media Files
               </p>
             </div>
             <div className="flex-1 flex justify-end">
-              {((currentPage === 'analysis' && fileId && !project) || currentPage === 'cuesynch' || currentPage === 'replacement') && (
+              {((currentPage === 'analysis' && fileId && !project) || currentPage === 'cuesynch' || currentPage === 'replacement' || currentPage === 'licensing') && (
                 <Button
                   variant="outline"
                   size="sm"
@@ -91,9 +92,7 @@ function App() {
                   <SelectionControls />
 
                   {/* Full-width Waveform */}
-                  <div className="glass-glow rounded-2xl overflow-hidden p-1">
-                    <WaveformViewer />
-                  </div>
+                  <WaveformViewer />
 
                   {/* Controls or Results */}
                   {!project ? (
@@ -104,10 +103,10 @@ function App() {
                   ) : (
                     <div className="space-y-8 animate-in fade-in duration-500">
                       {/* Results Header */}
-                      <div className="flex items-center justify-between glass p-6 rounded-2xl">
+                      <div className="flex items-center justify-between glass p-4 rounded-2xl">
                         <div>
-                          <h2 className="text-2xl font-medium font-display">Analysis Results</h2>
-                          <p className="text-foreground-muted">
+                          <h2 className="text-lg font-medium font-display">Analysis Results</h2>
+                          <p className="text-foreground-muted text-sm">
                             {project.cues.length} cues analyzed - Click cues above or cards below to navigate
                           </p>
                         </div>
@@ -144,6 +143,10 @@ function App() {
           ) : currentPage === 'cuesynch' ? (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
               <CueSynch />
+            </div>
+          ) : currentPage === 'licensing' ? (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <LicensingPage />
             </div>
           ) : (
             <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">

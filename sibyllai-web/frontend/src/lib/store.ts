@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { SibylProject, CuratedAttributes, ProjectContextCue } from './types'
 
-type Page = 'analysis' | 'cuesynch' | 'replacement'
+type Page = 'analysis' | 'cuesynch' | 'replacement' | 'licensing'
 type MixType = 'clean_mx' | 'full_mix'
 
 interface AppState {

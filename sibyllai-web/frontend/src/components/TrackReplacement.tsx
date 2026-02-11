@@ -8,7 +8,7 @@ import { LibraryManager } from '@/components/LibraryManager'
 import type { LibraryMatch } from '@/lib/types'
 
 export function TrackReplacement() {
-  const { project, fileName, sessionId, activeCueId, setActiveCueId, updateCueContext } = useAppStore()
+  const { project, fileName, sessionId, activeCueId, setActiveCueId, updateCueContext, setCurrentPage } = useAppStore()
 
   const cueCount = project?.cues.length ?? 0
   const cueOptions = useMemo(
@@ -423,6 +423,17 @@ export function TrackReplacement() {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Finalize button */}
+          <div className="flex justify-end">
+            <Button
+              className="btn-primary px-6"
+              onClick={() => setCurrentPage('licensing')}
+              disabled={!project?.cues.some((c) => c.project_context?.status === 'matched')}
+            >
+              Finalize Track Replacement →
+            </Button>
           </div>
         </>
       )}
