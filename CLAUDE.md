@@ -30,19 +30,19 @@ pip install -e .[dev]
 
 ### Running the Web App (Development)
 
-**⚠️ CRITICAL: BACKEND MUST ALWAYS RUN ON PORT 8001 ⚠️**
+**⚠️ CRITICAL: BACKEND MUST ALWAYS RUN ON PORT 8003 ⚠️**
 
-The Vite proxy configuration is hardcoded to forward `/api` requests to `localhost:8001`. Using any other port will cause upload/analysis to freeze with no error messages.
+The Vite proxy configuration is hardcoded to forward `/api` requests to `localhost:8003`. Using any other port will cause upload/analysis to freeze with no error messages.
+
+Port 8001 is reserved for kazen — **never kill kazen or use port 8001**.
 
 ```bash
-# Backend (from project root) - ALWAYS PORT 8001
-cd sibyllai-web/backend && python3 -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8001
+# Backend (from project root) - ALWAYS PORT 8003
+cd sibyllai-web/backend && python3 -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8003
 
-# Frontend (from project root) - ALWAYS PORT 5173 (default)
+# Frontend (from project root) - ALWAYS PORT 5174
 cd sibyllai-web/frontend && npm run dev
 ```
-
-**NEVER use port 8000, 8002, or any other port for development backend.**
 
 If you need to change the port, update BOTH:
 1. `sibyllai-web/frontend/vite.config.ts` (proxy target)
@@ -344,4 +344,4 @@ Each run creates an incremental folder to avoid overwriting previous analyses.
 - 73 music regions detected
 - Accurate genre/mood/energy classification for film scores
 - All models (YAMNet, CLAP, Music2Emo, Essentia) working correctly
-- always use port 8001 for this app
+- always use port 8003 for this app (port 8001 is reserved for kazen — never kill it)

@@ -163,28 +163,25 @@ export function CueCard({ cue, index }: CueCardProps) {
     >
       {/* Header row */}
       <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3">
-          <span className="text-lg font-medium font-display">Cue {index + 1}</span>
-          <span className="text-sm text-foreground-muted font-mono">{cue.start_tc} - {cue.end_tc}</span>
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-lg font-medium font-display shrink-0">Cue {index + 1}</span>
+          <span className="text-sm text-foreground-muted font-mono shrink-0">{cue.start_tc} - {cue.end_tc}</span>
           {isMatched && (
-            <span className="text-xs uppercase tracking-wide px-2 py-0.5 rounded-full bg-primary/20 text-primary">
+            <span className="text-xs uppercase tracking-wide px-2 py-0.5 rounded-full bg-primary/20 text-primary shrink-0">
               Matched
             </span>
           )}
           {isPlaying && (
-            <span className="flex items-center gap-0.5 ml-2">
+            <span className="flex items-center gap-0.5 ml-2 shrink-0">
               <span className="w-1 h-3 bg-primary rounded-full animate-[soundbar_0.5s_ease-in-out_infinite_alternate]" style={{ animationDelay: '0ms' }} />
               <span className="w-1 h-3 bg-primary rounded-full animate-[soundbar_0.5s_ease-in-out_infinite_alternate]" style={{ animationDelay: '150ms' }} />
               <span className="w-1 h-3 bg-primary rounded-full animate-[soundbar_0.5s_ease-in-out_infinite_alternate]" style={{ animationDelay: '300ms' }} />
             </span>
           )}
         </div>
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex items-center gap-3 text-xs shrink-0">
           {isActive && !isExpanded && (
             <span className="text-primary font-medium">SPACE to play</span>
-          )}
-          {isActive && !isExpanded && (
-            <span className="text-foreground-muted">Click to edit</span>
           )}
         </div>
       </div>

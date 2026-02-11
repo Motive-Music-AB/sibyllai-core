@@ -15,6 +15,8 @@ import type {
   LibraryMatchRequest,
   LibraryMatchResponse,
   LibraryInfo,
+  LibrarySource,
+  LibraryTrack,
   CueReplacementRequest,
   CueReplacementResponse,
 } from './types'
@@ -153,6 +155,45 @@ export const api = {
     const response = await axios.put<CueReplacementResponse>(
       `${API_BASE}/projects/${sessionId}/cues/${cueId}/replacement`,
       update
+    )
+    return response.data
+  },
+
+  /**
+   * Get the audio URL for a library track (for use with <audio> element)
+   */
+  getLibraryAudioUrl(trackId: string): string {
+    return `${API_BASE}/library/audio/${encodeURIComponent(trackId)}`
+  },
+
+  /**
+   * Get per-source stats for the library
+   */
+  async getLibrarySources(dbPath?: string): Promise<LibrarySource[]> {
+    const response = await axios.get<LibrarySource[]>(`${API_BASE}/library/sources`, {
+      params: dbPath ? { db_path: dbPath } : undefined,
+    })
+    return response.data
+  },
+
+  /**
+   * Get tracks for a library source
+   */
+  async getLibraryTracks(sourceName: string, dbPath?: string): Promise<LibraryTrack[]> {
+    const response = await axios.get<LibraryTrack[]>(
+      `${API_BASE}/library/sources/${encodeURIComponent(sourceName)}/tracks`,
+      { params: dbPath ? { db_path: dbPath } : undefined }
+    )
+    return response.data
+  },
+
+  /**
+   * Delete all tracks and windows for a library source
+   */
+  async deleteLibrarySource(sourceName: string, dbPath?: string): Promise<{ tracks_deleted: number; windows_deleted: number }> {
+    const response = await axios.delete<{ tracks_deleted: number; windows_deleted: number }>(
+      `${API_BASE}/library/sources/${encodeURIComponent(sourceName)}`,
+      { params: dbPath ? { db_path: dbPath } : undefined }
     )
     return response.data
   },

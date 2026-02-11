@@ -1,5 +1,6 @@
 """SibyllAI FastAPI Backend - Two-Phase Music Analysis API."""
 from fastapi import FastAPI, UploadFile, File, Form, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pathlib import Path
@@ -23,7 +24,10 @@ from core.library_index import (
     build_library_index,
     build_features_from_cue,
     build_vector_from_cue,
+    delete_library_source,
     get_library_info,
+    get_library_sources,
+    get_library_tracks,
     load_meta_from_db,
     load_schema_from_db,
     normalize_key,
@@ -629,13 +633,16 @@ async def update_cue_replacement(session_id: str, cue_id: str, update: CueReplac
                 cue_found = True
                 project_context = cue.get("project_context", {})
                 project_context["status"] = update.status
-                project_context["replacement"] = {
-                    "track_path": update.track_path,
-                    "start": update.start,
-                    "end": update.end,
-                    "score": update.score,
-                    "window_size": update.window_size,
-                }
+                if update.status == "draft":
+                    project_context.pop("replacement", None)
+                else:
+                    project_context["replacement"] = {
+                        "track_path": update.track_path,
+                        "start": update.start,
+                        "end": update.end,
+                        "score": update.score,
+                        "window_size": update.window_size,
+                    }
                 cue["project_context"] = project_context
                 break
 
@@ -819,6 +826,69 @@ async def match_library(request: LibraryMatchRequest):
         "cue_length": cue_length,
         "matches": matches,
     }
+
+
+@app.get("/api/library/audio/{track_id}")
+async def library_audio(track_id: str, db_path: Optional[str] = None):
+    """
+    Serve a library track's audio file by track_id.
+    The frontend uses this URL with an <audio> element and seeks to the match window.
+    """
+    import sqlite3
+
+    path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Library index not found")
+
+    conn = sqlite3.connect(str(path))
+    row = conn.execute("SELECT path FROM tracks WHERE id = ?", (track_id,)).fetchone()
+    conn.close()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Track not found")
+
+    track_path = Path(row[0])
+    if not track_path.exists():
+        raise HTTPException(status_code=404, detail="Audio file not found on disk")
+
+    # Determine media type from extension
+    suffix = track_path.suffix.lower()
+    media_types = {
+        ".wav": "audio/wav",
+        ".mp3": "audio/mpeg",
+        ".m4a": "audio/mp4",
+        ".flac": "audio/flac",
+        ".ogg": "audio/ogg",
+        ".aac": "audio/aac",
+    }
+    media_type = media_types.get(suffix, "application/octet-stream")
+
+    return FileResponse(
+        path=str(track_path),
+        media_type=media_type,
+        filename=track_path.name,
+    )
+
+
+@app.get("/api/library/sources")
+async def list_library_sources(db_path: Optional[str] = None):
+    """Return per-source stats for the library index."""
+    path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    return get_library_sources(path)
+
+
+@app.get("/api/library/sources/{source_name}/tracks")
+async def list_library_tracks(source_name: str, db_path: Optional[str] = None):
+    """Return tracks for a given library source."""
+    path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    return get_library_tracks(path, source_name)
+
+
+@app.delete("/api/library/sources/{source_name}")
+async def remove_library_source(source_name: str, db_path: Optional[str] = None):
+    """Delete all tracks and windows for a library source."""
+    path = Path(db_path) if db_path else DEFAULT_DB_PATH
+    return delete_library_source(path, source_name)
 
 
 # Optional: Cleanup endpoint

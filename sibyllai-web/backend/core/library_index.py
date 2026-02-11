@@ -663,6 +663,120 @@ def get_library_info(db_path: Path) -> dict:
     }
 
 
+def get_library_sources(db_path: Path) -> list[dict]:
+    """Return per-source stats: source_name, source_type, track_count, total_windows, total_duration, last_added."""
+    if not db_path.exists():
+        return []
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_track_columns(conn)
+        rows = conn.execute(
+            """
+            SELECT
+                t.source_name,
+                t.source_type,
+                COUNT(DISTINCT t.id) AS track_count,
+                COUNT(w.id) AS total_windows,
+                COALESCE(SUM(DISTINCT t.duration), 0) AS total_duration,
+                MAX(t.added_at) AS last_added
+            FROM tracks t
+            LEFT JOIN windows w ON w.track_id = t.id
+            GROUP BY t.source_name, t.source_type
+            ORDER BY last_added DESC
+            """,
+        ).fetchall()
+
+    return [
+        {
+            "source_name": row[0] or "Unknown",
+            "source_type": row[1] or "unknown",
+            "track_count": row[2],
+            "total_windows": row[3],
+            "total_duration": row[4],
+            "last_added": row[5],
+        }
+        for row in rows
+    ]
+
+
+def _source_name_condition(source_name: str) -> tuple[str, tuple]:
+    """Return SQL condition and params for matching source_name, handling NULL."""
+    if source_name == "Unknown":
+        return "(t.source_name IS NULL OR t.source_name = ?)", (source_name,)
+    return "t.source_name = ?", (source_name,)
+
+
+def get_library_tracks(db_path: Path, source_name: str) -> list[dict]:
+    """Return tracks for a given source with window counts."""
+    if not db_path.exists():
+        return []
+
+    condition, params = _source_name_condition(source_name)
+    with sqlite3.connect(db_path) as conn:
+        _ensure_track_columns(conn)
+        rows = conn.execute(
+            f"""
+            SELECT
+                t.id,
+                t.filename,
+                t.path,
+                t.duration,
+                t.size,
+                t.added_at,
+                COUNT(w.id) AS window_count
+            FROM tracks t
+            LEFT JOIN windows w ON w.track_id = t.id
+            WHERE {condition}
+            GROUP BY t.id
+            ORDER BY t.filename
+            """,
+            params,
+        ).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "filename": row[1] or Path(row[2]).name,
+            "path": row[2],
+            "duration": row[3],
+            "size": row[4],
+            "added_at": row[5],
+            "window_count": row[6],
+        }
+        for row in rows
+    ]
+
+
+def delete_library_source(db_path: Path, source_name: str) -> dict:
+    """Delete all tracks and windows for a source. Returns counts of deleted items."""
+    if not db_path.exists():
+        return {"tracks_deleted": 0, "windows_deleted": 0}
+
+    condition, params = _source_name_condition(source_name)
+
+    with sqlite3.connect(db_path) as conn:
+        _ensure_track_columns(conn)
+        track_ids = [
+            row[0]
+            for row in conn.execute(
+                f"SELECT t.id FROM tracks t WHERE {condition}", params
+            ).fetchall()
+        ]
+        if not track_ids:
+            return {"tracks_deleted": 0, "windows_deleted": 0}
+
+        placeholders = ",".join("?" for _ in track_ids)
+        windows_deleted = conn.execute(
+            f"DELETE FROM windows WHERE track_id IN ({placeholders})", track_ids
+        ).rowcount
+        tracks_deleted = conn.execute(
+            f"DELETE FROM tracks WHERE id IN ({placeholders})", track_ids
+        ).rowcount
+        conn.commit()
+
+    return {"tracks_deleted": tracks_deleted, "windows_deleted": windows_deleted}
+
+
 def match_cue_to_library(
     cue_vector: list[float],
     cue_length: float,

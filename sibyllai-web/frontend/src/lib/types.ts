@@ -229,3 +229,22 @@ export interface LibraryInfo {
   windows: number
   meta: Record<string, unknown>
 }
+
+export interface LibrarySource {
+  source_name: string
+  source_type: string
+  track_count: number
+  total_windows: number
+  total_duration: number
+  last_added: string
+}
+
+export interface LibraryTrack {
+  id: string
+  filename: string
+  path: string
+  duration: number
+  size: number | null
+  added_at: string
+  window_count: number
+}

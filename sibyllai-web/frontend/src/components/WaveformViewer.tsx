@@ -36,6 +36,7 @@ export function WaveformViewer() {
 
   const [isPlaying, setIsPlaying] = useState(false)
   const [isReady, setIsReady] = useState(false)
+  const [waveformVersion, setWaveformVersion] = useState(0) // Increments after peak optimization to trigger region recreation
   const [zoom, setZoom] = useState(0)
   const [isZooming, setIsZooming] = useState(false) // For UI overlay only
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
@@ -121,6 +122,8 @@ export function WaveformViewer() {
             const peaks = ws.exportPeaks({ maxLength })
             console.log(`[Waveform] Exported ${peaks[0]?.length || 0} peaks`)
             ws.setOptions({ peaks, duration })
+            // Bump version to trigger region recreation after DOM rebuild
+            setWaveformVersion(v => v + 1)
           } catch (err) {
             console.warn('Waveform peak optimization failed:', err)
           }
@@ -625,7 +628,8 @@ export function WaveformViewer() {
   // PERFORMANCE: Callbacks and framerate/startTimecode removed from deps - we use refs
   // (isSegmentSelectedRef, findCueForSegmentRef, handleSegmentClickRef, framerateRef, startTimecodeRef)
   // to access latest values without triggering region recreation
-  }, [segments, selectedSegments, activeCueId, project, updateSegment, addSegment])
+  // waveformVersion: triggers recreation after peak optimization rebuilds the DOM
+  }, [segments, selectedSegments, activeCueId, project, updateSegment, addSegment, waveformVersion])
 
   // Track mouse position during dragging
   useEffect(() => {
