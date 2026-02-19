@@ -12,11 +12,15 @@ export default defineConfig({
   },
   server: {
     port: 5174,
+    strictPort: true,
+    allowedHosts: true,
     proxy: {
       '/api': {
         // Backend port (8003 to avoid conflict with other apps)
         target: 'http://localhost:8003',
         changeOrigin: true,
+        timeout: 0,
+        proxyTimeout: 0,
       },
       '/ws': {
         target: 'ws://localhost:8003',

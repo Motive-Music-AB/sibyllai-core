@@ -27,13 +27,18 @@ export const api = {
   /**
    * Upload an audio/video file for analysis
    */
-  async uploadFile(file: File): Promise<UploadResponse> {
+  async uploadFile(
+    file: File,
+    onProgress?: (percent: number) => void
+  ): Promise<UploadResponse> {
     const formData = new FormData()
     formData.append('file', file)
 
     const response = await axios.post<UploadResponse>(`${API_BASE}/upload`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
+      onUploadProgress: (event) => {
+        if (!onProgress || !event.total) return
+        const percent = Math.min(100, Math.round((event.loaded / event.total) * 100))
+        onProgress(percent)
       },
     })
 
@@ -120,11 +125,7 @@ export const api = {
     formData.append('reset', reset ? 'true' : 'false')
     formData.append('dedupe_simple', 'true')
 
-    const response = await axios.post<LibraryBuildResponse>(`${API_BASE}/library/build-upload`, formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    })
+    const response = await axios.post<LibraryBuildResponse>(`${API_BASE}/library/build-upload`, formData)
     return response.data
   },
 

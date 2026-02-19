@@ -9,6 +9,7 @@ import { api } from '@/lib/api'
 export function FileUpload() {
   const [isDragging, setIsDragging] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [startTimecode, setStartTimecode] = useState('01:00:00:00')
@@ -31,16 +32,20 @@ export function FileUpload() {
     if (!selectedFile) return
 
     setIsUploading(true)
+    setUploadProgress(0)
     setError(null)
 
     try {
-      const result = await api.uploadFile(selectedFile)
+      const result = await api.uploadFile(selectedFile, (percent) => {
+        setUploadProgress(percent)
+      })
       setUploadedFile(selectedFile, result.file_id, result.filename, startTimecode, framerate)
     } catch (err) {
       setError('Failed to upload file. Please try again.')
       console.error('Upload error:', err)
     } finally {
       setIsUploading(false)
+      setUploadProgress(null)
     }
   }, [selectedFile, startTimecode, framerate, setUploadedFile])
 
@@ -81,15 +86,15 @@ export function FileUpload() {
       </CardHeader>
       <CardContent className="pt-4">
         {!selectedFile ? (
-          <div
-            className={`group relative border-2 border-dashed rounded-2xl p-16 text-center transition-all duration-500 cursor-pointer overflow-hidden ${isDragging
+          <label
+            htmlFor="file-input"
+            className={`group relative border-2 border-dashed rounded-2xl p-16 text-center transition-all duration-500 cursor-pointer overflow-hidden block ${isDragging
                 ? 'border-primary bg-primary/10 shadow-glow'
                 : 'border-white/10 glass-lighter hover:border-primary/40 hover:bg-white/5'
               }`}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
-            onClick={() => document.getElementById('file-input')?.click()}
           >
             {/* Background Glow */}
             <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 to-transparent pointer-events-none" />
@@ -111,23 +116,21 @@ export function FileUpload() {
               <input
                 id="file-input"
                 type="file"
-                accept="audio/*,video/*"
+                accept=".wav,.mp3,.m4a,.aac,.flac,.ogg,.mp4,.mov,.mkv,.avi"
                 className="hidden"
                 onChange={handleFileSelect}
               />
-              <Button
-                variant="outline"
-                className="glass-lighter border-primary/20 pointer-events-none group-hover:bg-primary/20 transition-colors"
-                type="button"
+              <span
+                className="inline-flex items-center justify-center rounded-md text-sm font-medium glass-lighter border-primary/20 group-hover:bg-primary/20 transition-colors h-9 px-4 border pointer-events-none"
               >
                 Choose File
-              </Button>
+              </span>
             </div>
 
             {error && (
               <div className="mt-6 text-sm text-destructive bg-destructive/10 p-3 rounded-lg animate-in shake duration-500">{error}</div>
             )}
-          </div>
+          </label>
         ) : (
           <div className="space-y-8 animate-in fade-in slide-in-from-top-4 duration-500">
             {/* File info */}
@@ -194,7 +197,7 @@ export function FileUpload() {
                 {isUploading ? (
                   <div className="flex items-center gap-2">
                     <div className="w-5 h-5 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full animate-spin" />
-                    Uploading Analysis...
+                    {uploadProgress !== null ? `Uploading ${uploadProgress}%` : 'Uploading...'}
                   </div>
                 ) : 'Continue'}
               </Button>

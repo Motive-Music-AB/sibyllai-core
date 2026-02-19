@@ -160,6 +160,16 @@ body::before {
 
 /* No overlay — removed for neutral glass design */
 
+/* Lite mode: disable expensive blur for low-power devices.
+   Activate by adding ?lite to the URL. JS sets data-lite on <html>. */
+html[data-lite] .glass,
+html[data-lite] .glass-lighter,
+html[data-lite] .card,
+html[data-lite] [data-slot="card"] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 /* =============================================================================
    GLASS CARD UTILITY CLASSES
    ============================================================================= */
