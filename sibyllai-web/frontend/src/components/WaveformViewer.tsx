@@ -39,7 +39,6 @@ export function WaveformViewer() {
   const [isReady, setIsReady] = useState(false)
   const [waveformVersion, setWaveformVersion] = useState(0) // Increments after peak optimization to trigger region recreation
   const [zoom, setZoom] = useState(0)
-  const [isZooming, setIsZooming] = useState(false) // For UI overlay only
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
   // Combined state for ruler data - prevents double renders when updating width and ticks
   const [rulerData, setRulerData] = useState<{
@@ -424,7 +423,7 @@ export function WaveformViewer() {
         color,
         drag: editable,
         resize: editable,
-        content: '',  // Empty content, we'll add button manually
+        content: '',
       })
 
       // Add event handlers
@@ -433,42 +432,6 @@ export function WaveformViewer() {
         region.element.style.borderLeft = '2px solid rgba(100, 116, 139, 0.6)'
         region.element.style.borderRight = '2px solid rgba(100, 116, 139, 0.6)'
         region.element.style.boxSizing = 'border-box'
-
-        // Create and add select button programmatically (only before analysis)
-        if (!project) {
-          const button = document.createElement('button')
-          button.className = 'region-select-btn'
-          button.textContent = selected ? '✓' : 'Select'
-          button.style.cssText = `
-            position: absolute;
-            top: 4px;
-            right: 4px;
-            padding: 2px 8px;
-            font-size: 11px;
-            font-weight: 500;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-            z-index: 10;
-            background-color: ${selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(148, 163, 184, 0.7)'};
-            color: white;
-            transition: background-color 0.2s;
-          `
-
-          button.addEventListener('mouseenter', () => {
-            button.style.opacity = '0.8'
-          })
-          button.addEventListener('mouseleave', () => {
-            button.style.opacity = '1'
-          })
-
-          button.addEventListener('click', (e) => {
-            e.stopPropagation()
-            toggleSegmentSelectionRef.current(start, end)
-          })
-
-          region.element.appendChild(button)
-        }
 
         // Click handler - use ref to get latest callback
         region.on('click', (e) => {
@@ -669,7 +632,6 @@ export function WaveformViewer() {
     if (!wavesurferRef.current || isZoomingRef.current) return
 
     isZoomingRef.current = true  // Synchronous - prevents overlapping zoom operations
-    setIsZooming(true)  // For UI overlay only
 
     const ws = wavesurferRef.current
     const duration = ws.getDuration()
@@ -712,7 +674,6 @@ export function WaveformViewer() {
         pendingScrollRef.current = null
       }
       isZoomingRef.current = false
-      setIsZooming(false)
     })
   }
 
@@ -743,7 +704,6 @@ export function WaveformViewer() {
     }
 
     isZoomingRef.current = true  // Synchronous - prevents overlapping zoom operations
-    setIsZooming(true)  // For UI overlay only
 
     // Defer zoom(0) until after layout so WaveSurfer uses the correct width.
     if (newZoom === 0) {
@@ -785,7 +745,6 @@ export function WaveformViewer() {
         pendingScrollRef.current = null
       }
       isZoomingRef.current = false
-      setIsZooming(false)
     })
   }
 
@@ -794,7 +753,6 @@ export function WaveformViewer() {
     if (isZoomingRef.current) return
 
     isZoomingRef.current = true  // Synchronous - prevents overlapping zoom operations
-    setIsZooming(true)  // For UI overlay only
     zoomRef.current = 0
     setZoom(0)
 
@@ -805,7 +763,6 @@ export function WaveformViewer() {
       updateWidthAndTicks()
       ws.setScroll(0)
       isZoomingRef.current = false
-      setIsZooming(false)
     })
   }
 
@@ -843,15 +800,6 @@ export function WaveformViewer() {
           <div
             className="overflow-x-auto rounded-lg bg-[hsla(0,0%,15%,0.35)] relative waveform-scroll-container"
           >
-            {/* Zoom loading overlay */}
-            {isZooming && (
-              <div className="absolute inset-0 bg-background/50 backdrop-blur-sm z-20 flex items-center justify-center">
-                <div className="flex items-center gap-2 text-foreground-muted text-sm">
-                  <div className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
-                  Zooming...
-                </div>
-              </div>
-            )}
             {/* Wrapper that contains both ruler and waveform - scrolls as one unit */}
             <div
               style={{
@@ -917,6 +865,88 @@ export function WaveformViewer() {
                 )
               })()}
 
+              {/* Segment label lane — checkboxes (pre-analysis) or cue numbers (post-analysis) */}
+              {isReady && segments.length > 0 && (() => {
+                const duration = wavesurferRef.current?.getDuration() || 1
+                let displayW = waveformWidth
+                if (!displayW || displayW === 0) {
+                  const wrapper = wavesurferRef.current?.getWrapper()
+                  if (zoom === 0) {
+                    const container = waveformRef.current?.parentElement
+                    displayW = container?.clientWidth || wrapper?.clientWidth || 0
+                  } else {
+                    displayW = wrapper?.scrollWidth || wrapper?.clientWidth || 0
+                  }
+                }
+                const segs = segments.slice(0, 20) // MAX_REGIONS cap
+
+                return (
+                  <div
+                    className="relative h-7 bg-[hsla(0,0%,12%,0.4)] border-b border-white/5 pointer-events-none"
+                    style={{
+                      width: zoom === 0 ? '100%' : `${displayW}px`,
+                      minWidth: zoom === 0 ? '100%' : `${displayW}px`,
+                    }}
+                  >
+                    {segs.map(([start, end], i) => {
+                      const leftPx = (start / duration) * displayW
+                      const widthPx = ((end - start) / duration) * displayW
+                      const actualIndex = segments.findIndex(([s, e]) => s === start && e === end)
+                      const selected = isSegmentSelected(start, end)
+                      const cue = findCueForSegment(start, end)
+
+                      // Hide on very narrow segments
+                      if (widthPx < 16) return null
+
+                      if (project && cue) {
+                        // Post-analysis: cue number label
+                        const cueIndex = project.cues.findIndex(c => c.id === cue.id)
+                        return (
+                          <div
+                            key={actualIndex}
+                            className="absolute top-0 h-full flex items-center justify-center"
+                            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                          >
+                            <span className="text-[11px] font-semibold text-foreground/50 select-none">
+                              #{cueIndex + 1}
+                            </span>
+                          </div>
+                        )
+                      }
+
+                      if (!project) {
+                        // Pre-analysis: checkbox
+                        return (
+                          <div
+                            key={actualIndex}
+                            className="absolute top-0 h-full flex items-center justify-center"
+                            style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
+                          >
+                            <button
+                              className="pointer-events-auto flex items-center justify-center w-5 h-5 rounded border-2 transition-all text-[13px] font-semibold leading-5"
+                              style={{
+                                borderColor: selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(200, 200, 200, 0.5)',
+                                backgroundColor: selected ? 'rgba(34, 197, 94, 0.9)' : 'transparent',
+                                color: 'white',
+                                cursor: 'pointer',
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                toggleSegmentSelection(start, end)
+                              }}
+                            >
+                              {selected ? '✓' : ''}
+                            </button>
+                          </div>
+                        )
+                      }
+
+                      return null
+                    })}
+                  </div>
+                )
+              })()}
+
               <div ref={waveformRef} className="w-full" />
 
               {/* Dragging timecode tooltips - bottom-right corner near mouse cursor */}
@@ -976,7 +1006,7 @@ export function WaveformViewer() {
                   variant="outline"
                   size="sm"
                   onClick={handleZoomOut}
-                  disabled={zoom === ZOOM_LEVELS[0] || isZooming}
+                  disabled={zoom === ZOOM_LEVELS[0]}
                 >
                   Zoom Out
                 </Button>
@@ -984,7 +1014,7 @@ export function WaveformViewer() {
                   variant="outline"
                   size="sm"
                   onClick={handleZoomReset}
-                  disabled={zoom === 0 || isZooming}
+                  disabled={zoom === 0}
                 >
                   Fit
                 </Button>
@@ -992,7 +1022,7 @@ export function WaveformViewer() {
                   variant="outline"
                   size="sm"
                   onClick={handleZoomIn}
-                  disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1] || isZooming}
+                  disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
                 >
                   Zoom In
                 </Button>
