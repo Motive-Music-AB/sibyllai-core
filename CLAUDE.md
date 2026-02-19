@@ -300,6 +300,21 @@ Each run creates an incremental folder to avoid overwriting previous analyses.
 
 ## Changelog
 
+### February 2026 - Segment Label Lane & UI Cleanup
+
+**Segment Label Lane (WaveformViewer):**
+- Added a dedicated horizontal lane between the timecode ruler and the waveform
+- Pre-analysis: renders selection checkboxes per segment (green ✓ when selected)
+- Post-analysis: renders cue number labels (#1, #2, etc.) for analyzed segments
+- Lane scrolls and resizes with zoom automatically (same width calc as ruler)
+- Narrow segments (<16px) hide their label to avoid visual clutter
+- Container is pointer-events-none so clicks in gaps pass through to the waveform
+- Replaced old imperative DOM checkbox buttons that were appended inside WaveSurfer regions
+
+**Removed Zoom Overlay:**
+- Removed the orange "Zooming..." spinner overlay that appeared during zoom transitions
+- The synchronous zoom guard (isZoomingRef) still prevents race conditions from rapid clicks
+
 ### November 2025 - MVP Backend Complete
 
 **Major Performance Improvement:**
