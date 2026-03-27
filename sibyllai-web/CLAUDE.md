@@ -6,12 +6,17 @@ This file provides guidance to Claude Code when working with the web UI.
 
 ### Running the App (Development)
 
-**Backend** (port 8002 to avoid conflict with kazen on 8001):
+**⚠️ CRITICAL: BACKEND MUST ALWAYS RUN ON PORT 8003 ⚠️**
+
+The Vite proxy configuration is hardcoded to forward `/api` requests to `localhost:8003`. Using any other port will cause upload/analysis to freeze with no error messages.
+
+Port 8001 is reserved for kazen — **never kill kazen or use port 8001**.
+
+**Backend** (port 8003):
 ```bash
 cd /Volumes/New\ 4\ TB/Dropbox/1_A_WORK/1_Projects/1_Motive-Music-AB/Motive/Github/sibyllai-core
 source .venv/bin/activate
-cd sibyllai-web/backend/api
-PORT=8002 uvicorn main:app --reload --port 8002
+cd sibyllai-web/backend && python3 -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8003
 ```
 
 **Frontend** (port 5174):
@@ -24,32 +29,43 @@ Access at: http://localhost:5174
 
 ### Port Configuration
 
-The frontend proxy is configured in `frontend/vite.config.ts`. If you need to change ports:
-1. Update `vite.config.ts` proxy target
-2. Update uvicorn port to match
+The frontend proxy is configured in `frontend/vite.config.ts`. If you need to change ports, update BOTH:
+1. `vite.config.ts` proxy target
+2. The uvicorn command port
+
+## Frontend Pages
+
+| Route | Component | Description |
+|-------|-----------|-------------|
+| `login` | LoginScreen | Authentication form |
+| `projects` | ProjectsPage | Project listing and selection |
+| `pipeline` / `analysis` | MotivePipeline | Primary view — upload, waveform, cue cards |
+| `cuesynch` | CueSynch | CSV cue marker import/synchronization |
+| `replacement` | TrackReplacement | Library upload, cue matching, match details |
+| `licensing` | LicensingPage | Licensing cost calculator |
+
+Layout: LoginScreen and ProjectsPage are standalone. Sub-pages use BrutalistLayout wrapper with header/footer.
 
 ## Testing Without UI
 
-You can test the analysis pipeline directly via curl or Python script.
-
-### Option 1: curl API Test
+### curl API Test
 
 ```bash
 # 1. Upload a test audio file
-curl -X POST http://localhost:8002/api/upload \
+curl -X POST http://localhost:8003/api/upload \
   -F "file=@/path/to/test-audio.wav" \
   | jq
 
 # Response: {"file_id": "abc123", "filename": "test-audio.wav", ...}
 
 # 2. Get segment preview
-curl -X POST http://localhost:8002/api/segment-preview \
+curl -X POST http://localhost:8003/api/segment-preview \
   -H "Content-Type: application/json" \
   -d '{"file_id": "abc123", "music_thresh": 0.2, "min_gap": 1.0, "min_cue_length": 3.0}' \
   | jq
 
 # 3. Run analysis on segments
-curl -X POST http://localhost:8002/api/analyze \
+curl -X POST http://localhost:8003/api/analyze-cues \
   -H "Content-Type: application/json" \
   -d '{"file_id": "abc123", "segments": [[0, 30], [45, 90]], "fps": 25}' \
   | jq
@@ -58,7 +74,7 @@ curl -X POST http://localhost:8002/api/analyze \
 cat backend/temp/<session_id>/project.sibyl.json | jq '.cues[0].musical_profile.curated'
 ```
 
-### Option 2: Python Test Script
+### Python Test Script
 
 Save as `test_analysis.py` and run from sibyllai-core root:
 
@@ -93,26 +109,6 @@ for name, score in genres.items():
     print(f"  {name}: {score:.4f}")
 ```
 
-Run:
-```bash
-cd /Volumes/New\ 4\ TB/Dropbox/1_A_WORK/1_Projects/1_Motive-Music-AB/Motive/Github/sibyllai-core
-source .venv/bin/activate
-python test_analysis.py
-```
-
-### Checking Backend Logs
-
-Monitor genre/instrument detection during analysis:
-```bash
-tail -f /private/tmp/claude-501/-Volumes-New-4-TB-Obsidian-AgentWorkspace/tasks/<task_id>.output | grep -E "(DEBUG|WARNING|genres|instruments)"
-```
-
-Look for:
-```
-[DEBUG] Detected instruments for segment 1: {'Percussion': 0.02, 'Singing': 0.01, ...}
-[DEBUG] Detected genres for segment 1: {'Pop music': 0.15, 'Rock music': 0.08, ...}
-```
-
 ## Data Model
 
 ### Curated Fields (displayed in UI)
@@ -126,22 +122,65 @@ Look for:
 
 ### Detected Fields (raw scores)
 
-- `detected.instruments_yamnet` - All YAMNet instrument scores
-- `detected.genres_yamnet` - All YAMNet genre scores
-- `detected.clap_style` - CLAP film-scoring vocabulary
-- `detected.clap_instrumentation` - CLAP ensemble detection
+- `detected.instruments_yamnet` — All YAMNet instrument scores
+- `detected.genres_yamnet` — All YAMNet genre scores
+- `detected.clap_style` — CLAP film-scoring vocabulary
+- `detected.clap_instrumentation` — CLAP ensemble detection
 - `detected.clap_production`, `clap_energy`, `clap_era`, `clap_function`
 
-## Recent Changes (Feb 2026)
+### Sections (per-cue internal structure)
 
-### YAMNet Genre Detection
-- Added `extract_genres()` function to yamnet_segmenter.py
-- Detects: Pop, Rock, Jazz, Electronic, Classical, Hip hop, etc.
-- Separate from CLAP's film-scoring "style" tags
+Cues >16s get internal section boundary detection via spectral novelty. Each section has:
+- `index`, `start`, `end`, `start_relative`, `end_relative`, `duration`
+- Lightweight analysis: `energy_label`, `clap_energy`, `bpm`, `key`
 
-### Vocal Detection
-- YAMNet instruments now include: Singing, Humming, Speech, Choir, Rapping, Chant, Whistling, Beatbox
+Stored in `musical_profile.sections[]`.
 
-### UI Updates
-- CueCard now shows both Genre (YAMNet) and Style (CLAP)
-- Instruments display from YAMNet (not CLAP instrumentation)
+## API Endpoints
+
+**Core Pipeline:**
+- `POST /api/upload` — Upload audio/video file → file_id
+- `POST /api/segment-preview` — Phase 1 fast segmentation
+- `POST /api/analyze-cues` — Phase 2 full analysis (background job)
+- `GET /api/analysis-status/{session_id}` — Check analysis progress
+- `GET /api/projects/{session_id}` — Load analyzed project
+- `WS /ws/progress/{session_id}` — Real-time progress updates
+
+**Cue Management:**
+- `PUT /api/projects/{session_id}/cues/{cue_id}` — Update curated attributes
+- `PUT /api/projects/{session_id}/cues/{cue_id}/replacement` — Set replacement track
+
+**Library:**
+- `POST /api/library/build` — Build index from server folder
+- `POST /api/library/build-upload` — Build/append index from uploaded files
+- `GET /api/library/status/{job_id}` — Build progress
+- `GET /api/library/info` — Index metadata
+- `GET /api/library/sources` — Per-source stats
+- `GET /api/library/sources/{source_name}/tracks` — List tracks for a source
+- `DELETE /api/library/sources/{source_name}` — Remove source
+- `POST /api/library/match` — Match cue to library → top N matches
+- `GET /api/library/audio/{track_id}` — Serve track audio for playback
+
+**Debug:**
+- `POST /api/debug-logs` — Receive frontend logs (auto-rotation)
+- `GET /api/debug-logs` — Retrieve last 100 log lines
+- `DELETE /api/cleanup/{file_id}` — Remove temp files
+
+## Debug Console
+
+In-app console for capturing browser logs (toggle with `D` key):
+- Intercepts `console.log/error/warn/info`
+- Syncs to backend every 2 seconds
+- Accessible at `backend/api/temp/debug.log`
+- Auto-rotates (keeps last 500 lines when file exceeds 1000 lines)
+
+```bash
+curl http://localhost:8003/api/debug-logs | jq '.logs[]'
+```
+
+## Detection Modes
+
+| Mode | Method | Default Threshold | Use Case |
+|------|--------|-------------------|----------|
+| Clean MX | RMS amplitude | 0.0005 | Music-only stems |
+| Full Mix | YAMNet classification | 0.2 (music_thresh) | Full film mix with DIA/SFX |

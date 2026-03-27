@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 import { generateCueCSV } from '@/lib/csv-export'
 import {
@@ -37,11 +36,9 @@ export function CueSynch() {
   const analysisFrameRate = project?.project?.fps ?? framerate ?? 24
 
   const getDefaultSelectedFields = useCallback((headers: string[], timeField: string) => {
-    // Select all non-time fields by default
     return headers.filter((header) => header !== timeField)
   }, [])
 
-  // Convert project cues to CueData format
   const convertProjectToCueData = useCallback(() => {
     if (!project) return null
 
@@ -58,7 +55,6 @@ export function CueSynch() {
     }
   }, [project, analysisFrameRate, fileName])
 
-  // Auto-load project data when available
   useEffect(() => {
     if (project && useAnalysisData) {
       const data = convertProjectToCueData()
@@ -167,7 +163,6 @@ export function CueSynch() {
     )
   }
 
-  // Title case helper
   const toTitleCase = (str: string) => str.replace(/\b\w/g, char => char.toUpperCase())
 
   const getPreview = () => {
@@ -176,10 +171,9 @@ export function CueSynch() {
     const parts = selectedFields.map((field) => {
       const value = row[field]
       if (!value) return null
-      // Add label prefixes with brackets for specific fields with capitalization
       const fieldLower = field.toLowerCase()
       const capitalizedValue = toTitleCase(value)
-      if (fieldLower === 'bpm') return `[BPM ${value}]` // Keep BPM value as-is (it's a number)
+      if (fieldLower === 'bpm') return `[BPM ${value}]`
       if (fieldLower === 'instruments') return `[Inst: ${capitalizedValue}]`
       if (fieldLower === 'genres') return `[Genre: ${capitalizedValue}]`
       if (fieldLower === 'style') return `[Style: ${capitalizedValue}]`
@@ -191,116 +185,94 @@ export function CueSynch() {
   const hasAnalysisData = !!project && project.cues.length > 0
 
   return (
-    <div className="space-y-6">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Nav toolbar */}
-      <div className="glass px-6 py-3 rounded-2xl flex items-center justify-between">
-        <Button variant="outline" size="sm" onClick={() => setCurrentPage('analysis')} className="glass-lighter border-primary/20">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <button className="btn-pill" onClick={() => setCurrentPage('pipeline')} style={{ height: 28, fontSize: '0.65rem' }}>
           ← Back
-        </Button>
-        <h2 className="text-lg font-medium font-display">Export to DAW or NLE</h2>
-        <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
+        </button>
+        <span className="label">Export to DAW or NLE</span>
+        <button className="btn-pill" onClick={reset} style={{ height: 28, fontSize: '0.65rem' }}>
           New Import
-        </Button>
+        </button>
       </div>
 
       {/* Data Source Info */}
       {hasAnalysisData && cueData && (
-        <div className="glass rounded-2xl p-4">
-          <p className="text-sm text-muted-foreground">
+        <div style={{ padding: 12, border: '1px solid #080808', borderRadius: 8 }}>
+          <p className="mono" style={{ fontSize: '0.75rem' }}>
             Using {project.cues.length} cues from: <strong>{fileName}</strong>
           </p>
-          <p className="text-sm text-muted-foreground">
+          <p className="mono" style={{ fontSize: '0.75rem' }}>
             Frame rate: <strong>{analysisFrameRate} fps</strong>
           </p>
         </div>
       )}
 
-      {/* File Upload - only show when no analysis data or explicitly choosing CSV */}
+      {/* File Upload */}
       {(!hasAnalysisData || !useAnalysisData) && (
         <div
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
           onClick={() => fileInputRef.current?.click()}
-          className={`glass rounded-2xl p-10 border-2 border-dashed transition-all cursor-pointer ${
-            file
-              ? 'border-green-500'
-              : 'border-muted-foreground/30 hover:border-primary'
-          }`}
+          className="track-card add-source"
+          style={{ padding: 40, textAlign: 'center' }}
         >
           <input
             ref={fileInputRef}
             type="file"
             accept=".csv"
             onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])}
-            className="hidden"
+            hidden
           />
-          <div className="text-center">
-            {file ? (
-              <>
-                <div className="text-3xl mb-3">&#10003;</div>
-                <p className="text-lg font-semibold text-green-500 mb-1.5">
-                  {file.name}
-                </p>
-                <p className="text-muted-foreground text-sm">
-                  Click to choose a different file
-                </p>
-              </>
-            ) : (
-              <>
-                <div className="text-5xl mb-3">&#128193;</div>
-                <p className="text-lg font-semibold mb-1.5">Drop CSV file here</p>
-                <p className="text-muted-foreground text-sm">or click to browse</p>
-              </>
-            )}
-          </div>
+          {file ? (
+            <>
+              <p style={{ fontSize: '0.85rem', fontWeight: 800, marginBottom: 4 }}>{file.name}</p>
+              <p className="mono" style={{ fontSize: '0.7rem', opacity: 0.5 }}>Click to choose a different file</p>
+            </>
+          ) : (
+            <>
+              <p style={{ fontSize: '0.85rem', fontWeight: 800, marginBottom: 4 }}>Drop CSV file here</p>
+              <p className="mono" style={{ fontSize: '0.7rem', opacity: 0.5 }}>or click to browse</p>
+            </>
+          )}
         </div>
       )}
 
-      {/* Hidden file input for when using analysis data but want to switch */}
       {hasAnalysisData && useAnalysisData && (
         <input
           ref={fileInputRef}
           type="file"
           accept=".csv"
           onChange={(e) => e.target.files && handleFileSelect(e.target.files[0])}
-          className="hidden"
+          hidden
         />
       )}
 
-      {/* Error Display */}
-      {error && (
-        <div className="bg-destructive/10 border border-destructive rounded-lg p-3">
-          <p className="text-destructive text-sm">{error}</p>
-        </div>
-      )}
+      {/* Error */}
+      {error && <div className="error-msg">{error}</div>}
 
       {/* Analyzing State */}
       {isAnalyzing && (
-        <div className="glass rounded-2xl p-5 text-center">
-          <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary mb-3"></div>
-          <p className="text-muted-foreground text-sm">Analyzing CSV...</p>
+        <div style={{ padding: 20, textAlign: 'center', border: '1px solid #080808', borderRadius: 8 }}>
+          <p className="mono" style={{ fontSize: '0.75rem' }}>Analyzing CSV...</p>
         </div>
       )}
 
       {/* Field Selection */}
       {cueData && cueData.headers && (
-        <div className="glass rounded-2xl p-4">
-          <h2 className="font-medium mb-4">Configure Markers</h2>
+        <div style={{ padding: 16, border: '1px solid #080808', borderRadius: 8 }}>
+          <div className="label" style={{ marginBottom: 12 }}>Configure Markers</div>
 
           {/* Sample Rate Selection */}
-          <div className="mb-4">
-            <p className="text-sm text-muted-foreground mb-2">
-              Sample Rate
-            </p>
-            <div className="flex gap-2">
+          <div style={{ marginBottom: 16 }}>
+            <p className="label" style={{ fontSize: '0.55rem', marginBottom: 6, opacity: 0.6 }}>Sample Rate</p>
+            <div style={{ display: 'flex', gap: 8 }}>
               {[44100, 48000, 96000].map((rate) => (
                 <label
                   key={rate}
-                  className={`inline-flex items-center px-4 py-2 rounded-lg cursor-pointer transition-colors text-sm ${
-                    sampleRate === rate
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted hover:bg-muted/80'
-                  }`}
+                  className={`btn-pill ${sampleRate === rate ? 'primary' : ''}`}
+                  style={{ height: 28, fontSize: '0.65rem', cursor: 'pointer' }}
                 >
                   <input
                     type="radio"
@@ -308,111 +280,83 @@ export function CueSynch() {
                     value={rate}
                     checked={sampleRate === rate}
                     onChange={() => setSampleRate(rate)}
-                    className="hidden"
+                    hidden
                   />
-                  <span>{rate === 44100 ? '44.1' : rate / 1000} kHz</span>
+                  {rate === 44100 ? '44.1' : rate / 1000} kHz
                 </label>
               ))}
             </div>
           </div>
 
           {/* Marker Fields Selection */}
-          <div className="mb-4">
-            <p className="text-sm text-muted-foreground mb-2">
-              Select columns to include in marker names
+          <div style={{ marginBottom: 16 }}>
+            <p className="label" style={{ fontSize: '0.55rem', marginBottom: 6, opacity: 0.6 }}>
+              Columns to include in marker names
             </p>
-            <div className="flex flex-wrap gap-1.5">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {cueData.headers
                 .filter((h) => h !== timeColumn)
                 .map((header) => (
                   <label
                     key={header}
-                    className={`inline-flex items-center px-3 py-1.5 rounded-lg cursor-pointer transition-colors text-sm ${
-                      selectedFields.includes(header)
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted hover:bg-muted/80'
-                    }`}
+                    className={`tag-toggle ${selectedFields.includes(header) ? 'selected' : ''}`}
+                    style={{ cursor: 'pointer' }}
                   >
                     <input
                       type="checkbox"
                       checked={selectedFields.includes(header)}
                       onChange={() => toggleField(header)}
-                      className="hidden"
+                      hidden
                     />
-                    <span>{header}</span>
+                    {header}
                   </label>
                 ))}
             </div>
           </div>
 
           {/* Preview */}
-          {selectedFields.length > 0 &&
-            cueData.rows &&
-            cueData.rows.length > 0 && (
-              <div className="bg-muted rounded-lg p-3">
-                <p className="text-sm text-muted-foreground mb-1">
-                  Preview (first marker):
-                </p>
-                <p className="font-mono text-sm">{getPreview()}</p>
-              </div>
-            )}
+          {selectedFields.length > 0 && cueData.rows && cueData.rows.length > 0 && (
+            <div style={{ padding: 10, background: '#E8E8E8', borderRadius: 6 }}>
+              <p className="label" style={{ fontSize: '0.55rem', marginBottom: 4, opacity: 0.6 }}>Preview (first marker):</p>
+              <p className="mono" style={{ fontSize: '0.75rem' }}>{getPreview()}</p>
+            </div>
+          )}
         </div>
       )}
 
       {/* Generate Button */}
       {cueData && (
-        <Button
+        <button
+          className="btn-pill primary"
           onClick={handleGenerateWAV}
           disabled={isGenerating || selectedFields.length === 0}
-          className="w-full btn-primary h-14 text-lg rounded-xl shadow-lg"
-          size="lg"
+          style={{ width: '100%', justifyContent: 'center', height: 44, fontSize: '0.85rem' }}
         >
-          {isGenerating ? (
-            <span className="flex items-center justify-center">
-              <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-primary-foreground mr-2.5"></div>
-              Generating WAV...
-            </span>
-          ) : (
-            'Generate & Download WAV'
-          )}
-        </Button>
+          {isGenerating ? 'Generating WAV...' : 'Generate & Download WAV'}
+        </button>
       )}
 
       {/* Instructions */}
       {cueData && (
-        <div className="glass rounded-2xl p-4">
-          <h3 className="font-medium mb-3">Next Steps</h3>
-          <ol className="space-y-2 text-sm text-muted-foreground">
-            <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">1.</span>
-              <span>Download the generated WAV file</span>
-            </li>
-            <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">2.</span>
-              <span>Open Logic Pro with your project</span>
-            </li>
-            <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">3.</span>
-              <span>
-                Import the audio file to the correct position (e.g.{' '}
-                <strong>01:00:00:00</strong> or <strong>00:00:00:00</strong>)
-              </span>
-            </li>
-            <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">4.</span>
-              <span>
-                Go to{' '}
-                <strong>Navigate &gt; Other &gt; Import Marker from Audio File</strong>
-              </span>
-            </li>
-            <li className="flex items-start">
-              <span className="font-medium text-foreground mr-2">5.</span>
-              <span>Markers will appear at their correct timestamps!</span>
-            </li>
+        <div style={{ padding: 16, border: '1px solid #080808', borderRadius: 8 }}>
+          <div className="label" style={{ marginBottom: 10 }}>Next Steps</div>
+          <ol style={{ paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {[
+              'Download the generated WAV file',
+              'Open Logic Pro with your project',
+              'Import the audio file to the correct position (e.g. 01:00:00:00)',
+              'Go to Navigate > Other > Import Marker from Audio File',
+              'Markers will appear at their correct timestamps!',
+            ].map((step, i) => (
+              <li key={i} className="mono" style={{ fontSize: '0.7rem', display: 'flex', alignItems: 'flex-start' }}>
+                <span style={{ fontWeight: 700, marginRight: 8, flexShrink: 0 }}>{i + 1}.</span>
+                <span>{step}</span>
+              </li>
+            ))}
           </ol>
-          <div className="mt-3 bg-muted/50 rounded-lg p-3">
-            <p className="text-sm text-muted-foreground">
-              <strong>Note:</strong> Also works with other DAWs that support WAV marker metadata (e.g. Adobe Audition).
+          <div style={{ marginTop: 10, padding: 8, background: '#E8E8E8', borderRadius: 4 }}>
+            <p className="mono" style={{ fontSize: '0.65rem', opacity: 0.7 }}>
+              Also works with other DAWs that support WAV marker metadata (e.g. Adobe Audition).
             </p>
           </div>
         </div>

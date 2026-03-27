@@ -1,158 +1,197 @@
 # SibyllAI Core
 
-**Status: 🚧 Work in Progress — Not fully working yet!**
+A music analysis tool for film composers, designed to analyze temp music (MX) tracks and extract comprehensive musical characteristics. The primary use case is **pre-scoring analysis**: composers receive temp MX from editors and use SibyllAI to understand what musical elements (genre, instrumentation, mood, energy) the director responded to, informing their original compositions.
 
-This repository contains the core engine for Motive-AI, an audio-spotting and mood-analysis tool designed to assist with film-music spotting, emotion mapping, and intelligent cue suggestions. The project is under active development and is being refactored for improved modularity and maintainability. 
-
-**Note:**
-- The codebase is not yet fully functional. Some features may be incomplete or broken.
-- Please check back for updates as development progresses.
+**Current Status:** MVP complete — web UI with two-phase analysis, library matching, and brutalist design system.
 
 ---
 
 ## How It Works (High-Level Flow)
 
-**Input → Analysis → Output**
+### Web UI (Primary)
 
-1. **CLI Entry** - User provides video/audio file via command line
-2. **Audio Extraction** - ffmpeg converts to mono 44.1kHz WAV
-3. **Cue Detection** - YAMNet scans entire file to find where music starts/stops
-4. **Per-Cue BPM** - Essentia analyzes tempo for each detected music segment
-5. **Per-Cue Key** - Essentia extracts harmonic key information
-6. **Per-Cue Instruments** - YAMNet detects individual instruments from 521 audio classes
-7. **Per-Cue Genre/Style/Energy** - CLAP classifies across 37 categorized tags (genre, production, energy, era, orchestration)
-8. **Per-Cue Mood** - Music2Emo analyzes valence, arousal, and emotional tags
-9. **Output** - Generates `project.sibyl.json` with all cue data (musical_profile + project_context)
+1. **Upload** audio/video file (WAV, MP3, M4A, MP4, MOV)
+2. **Phase 1 — Fast Segmentation** (~3 seconds): YAMNet or RMS amplitude detects music regions, displayed on an interactive waveform with adjustable thresholds
+3. **Phase 2 — Deep Analysis** (user-confirmed segments only):
+   - BPM (Essentia) + Key detection
+   - Instruments (YAMNet, top 15 from 521 audio classes)
+   - Genres (YAMNet: Pop, Rock, Jazz, Classical, etc.)
+   - Style/Energy/Era tags (CLAP, 37 categorized tags for film scoring)
+   - Mood (Music2Emo: valence, arousal, emotion tags)
+   - Internal structure detection (section boundaries within each cue)
+4. **Output** — `project.sibyl.json` with per-cue musical profiles + project context
 
-**Web UI flow**: Upload → Same backend pipeline → Display cues with waveforms + tags → Playback/editing
+### CLI
+
+```bash
+python -m sibyllai_core.cli <audio_or_video_file> --fps 25 --thr 0.5
+```
+
+Same analysis pipeline, outputs to `outputs/run_NNN/project.sibyl.json`.
+
+---
+
+## Detection Modes
+
+| Mode | Method | Default Threshold | Use Case |
+|------|--------|-------------------|----------|
+| **Clean MX** | RMS amplitude | 0.0005 | Music-only stems (no dialogue/SFX) |
+| **Full Mix** | YAMNet classification | 0.2 | Full film mix with dialogue and SFX |
 
 ---
 
 ## Tech Stack
-- **Python 3.11+**
-- **PyTorch** (deep learning, model inference)
-- **TensorFlow & Keras** (legacy and some model support)
-- **Hydra** (configuration management)
-- **Gradio** (demo UI)
-- **Librosa, SoundFile, Essentia** (audio processing)
-- **YAMNet** (music/speech segmentation)
-- **Demucs** (music source separation, experimental)
-- **pytorch-lightning** (training pipeline)
-- **Other ML/DS libraries:** scikit-learn, pandas, numpy, etc.
+
+**Backend:**
+- Python 3.11+
+- FastAPI (async web framework)
+- PyTorch 2.2.2 (pinned for compatibility — see security notice below)
+- TensorFlow & Keras (for YAMNet)
+- YAMNet (music segmentation, instrument detection, genre detection)
+- CLAP / LAION-CLAP (genre, production style, energy, era, function — 37 categorized tags)
+- Music2Emo (mood/emotion: valence, arousal, mood tags)
+- Essentia (BPM/rhythm extraction, key detection)
+- Librosa (audio processing, resampling)
+- PyTorch Lightning + Hydra (Music2Emo model infrastructure)
+
+**Frontend:**
+- React 18 + TypeScript
+- Vite (build tool)
+- WaveSurfer.js v7 (waveform visualization)
+- shadcn/ui + Tailwind CSS (UI components)
+- Zustand (state management)
+
+---
 
 ## Project Structure
+
 ```
 src/
   sibyllai_core/
-    cli.py           # Command-line interface
-    pipeline.py      # Main analysis pipeline
-    detectors/       # Audio/music feature detectors (e.g., AST, CLAP, YAMNet)
-    markers/         # Marker and export utilities
+    cli.py                  # Command-line interface
+    pipeline.py             # Main analysis pipeline (CLI path)
+    sibyl_format.py         # .sibyl.json project file format
+    detectors/
+      __init__.py           # Exports: music_probability, tag_chunk, global_moods, detect_sections, Section
+      yamnet_segmenter.py   # Music segmentation, instrument & genre detection
+      clap.py               # CLAP audio-text embeddings (37 categorized tags)
+      m2e_wrapper.py        # Music2Emo mood/emotion wrapper
+      chord_detector.py     # Key detection
+      structure.py          # Internal section boundary detection (spectral novelty)
+      ast.py                # Audio spectrogram transformer (legacy)
+    markers/                # Marker and export utilities
     thirdparty/
-      music2emo/     # Integrated and modified Music2Emo package
-        ...          # (models, utils, configs, etc.)
+      music2emo/            # Integrated Music2Emo package (models, configs)
+
+sibyllai-web/
+  backend/
+    api/
+      main.py               # FastAPI app — all REST + WebSocket endpoints
+    core/
+      analysis.py            # Phase 2 deep analysis (runs all detectors)
+      library_index.py       # SQLite library index for track replacement matching
+  frontend/
+    src/
+      components/
+        MotivePipeline.tsx   # Primary analysis view (upload → waveform → cue cards)
+        WaveformViewer.tsx   # WaveSurfer.js waveform with zoom, segments, playback
+        CueCard.tsx          # Per-cue analysis results display
+        TrackReplacement.tsx # Library upload, cue matching, match details
+        CueSynch.tsx         # CSV cue marker import/synchronization
+        LibraryManager.tsx   # Library index management
+        LicensingPage.tsx    # Licensing cost calculator
+        LoginScreen.tsx      # Authentication
+        ProjectsPage.tsx     # Project listing and selection
+      lib/
+        api.ts               # API client
+        store.ts             # Zustand state management
+        types.ts             # TypeScript type definitions
 ```
-- **examples/data/**: Example audio/video files for testing
-- **outputs/**: Default output directory for CLI results
 
 ---
 
-## Detailed Code-Level Flow
+## Detailed Pipeline Flow
 
-1. **CLI Entry**
-   - **File:** `src/sibyllai_core/cli.py`
-   - **Function:** `main()`
-   - **What it does:**
-     - Parses arguments with `build_parser()`
-     - Calls `analyse()` from `pipeline.py`
-     - Example:
-       ```python
-       def main(argv=None):
-           args = build_parser().parse_args(argv)
-           analyse(pathlib.Path(args.src), pathlib.Path(args.out), args.thr, args.fps)
-       ```
-
-2. **Pipeline Orchestration**
-   - **File:** `src/sibyllai_core/pipeline.py`
-   - **Function:** `analyse(src: Path, out: Path, thr: float, fps: int)`
-   - **What it does:**
-     - Loads the input file (audio/video)
-     - Calls detector modules (see below)
-     - Aggregates results
-     - Calls marker/export utilities
-     - Writes output files to `out` directory
-
-3. **Detectors**
-   - **Folder:** `src/sibyllai_core/detectors/`
-   - **Files/Functions:**
-     - `yamnet_segmenter.py` — e.g., `YAMNetSegmenter.analyse()` (music/speech segmentation)
-     - `ast.py` — e.g., `ASTDetector.analyse()`
-     - `clap.py` — e.g., `CLAPDetector.analyse()`
-     - `m2e_wrapper.py` — e.g., `global_moods()`
-   - **What they do:**
-     - Each provides a function or class to analyze the input and return features or predictions.
-
-4. **Source Separation (Experimental)**
-   - **Demucs** is used to separate music from other stems before mood analysis. This step is experimental and may not be fully stable yet.
-
-5. **Music2Emo Integration**
-   - **File:** `src/sibyllai_core/detectors/m2e_wrapper.py`
-   - **Function:** `global_moods(wav_path: str, threshold: float = 0.5)`
-   - **What it does:**
-     - Instantiates `Music2emo` from `thirdparty/music2emo/music2emo.py`
-     - Calls `.predict()` on the input file
-     - Returns a dictionary with valence, arousal, and mood tags
-
-6. **Music2Emo Model**
-   - **File:** `src/sibyllai_core/thirdparty/music2emo/music2emo.py`
-   - **Class:** `Music2emo`
-   - **Function:** `predict(audio: str, threshold: float = 0.5) -> dict`
-   - **What it does:**
-     - Loads model weights
-     - Extracts features from audio
-     - Runs inference and returns predictions
-
-7. **Markers and Export**
-   - **File:** `src/sibyllai_core/markers/export.py`
-   - **Function:** e.g., `export_markers(results, out_path)`
-   - **What it does:**
-     - Takes results from detectors/pipeline
-     - Writes marker files or other outputs
-
-8. **Output**
-   - **Directory:** `outputs/` (or as specified by `--out`)
-   - **What's written:**
-     - Marker files, analysis results, logs, etc.
+1. **Audio Extraction** — ffmpeg converts input to mono 44.1 kHz WAV
+2. **Music Cue Detection** (`yamnet_segmenter.py`):
+   - Clean MX mode: RMS amplitude thresholding
+   - Full Mix mode: YAMNet music probability classification
+   - Returns list of (start, end) time ranges
+3. **Per-Cue Analysis** (7 detectors):
+   - **BPM**: Essentia RhythmExtractor2013 (requires 44100 Hz)
+   - **Key**: Chord/key detection
+   - **Instruments**: YAMNet — top 15 from 521 audio event classes (includes vocals: Singing, Humming, Choir, etc.)
+   - **Genres**: YAMNet — Pop, Rock, Jazz, Electronic, Classical, Hip hop, Country, etc.
+   - **Style/Tags**: CLAP — 37 tags across genre, production, energy, era, function, instrumentation
+   - **Mood**: Music2Emo — valence (0-1), arousal (0-1), emotion tags
+   - **Structure**: Spectral novelty change-point detection — finds internal section boundaries (intro, verse, chorus, bridge, build-up, climax)
+4. **Per-Section Lightweight Analysis** — for cues >16s, each detected section gets energy, BPM, and key
+5. **Output** — `project.sibyl.json` with `musical_profile` (universal) + `project_context` (project-specific)
 
 ---
 
-## Visual Flowchart (Mermaid)
+## Track Replacement (Library Matching)
 
-```mermaid
-flowchart TD
-    CLI["cli.py<br/>main()"] -->|parse args| Pipeline["pipeline.py<br/>analyse()"]
-    Pipeline -->|calls| YAMNet["detectors/yamnet_segmenter.py<br/>YAMNetSegmenter.analyse()"]
-    Pipeline -->|calls| AST["detectors/ast.py<br/>ASTDetector.analyse()"]
-    Pipeline -->|calls| CLAP["detectors/clap.py<br/>CLAPDetector.analyse()"]
-    Pipeline -->|calls| Demucs["demucs<br/>(source separation, experimental)"]
-    Pipeline -->|calls| M2E["detectors/m2e_wrapper.py<br/>global_moods()"]
-    M2E -->|calls| Music2Emo["thirdparty/music2emo/music2emo.py<br/>Music2emo.predict()"]
-    Pipeline -->|calls| Markers["markers/export.py<br/>export_markers()"]
-    Pipeline -->|writes| Output["outputs/<br/>(results, markers, etc.)"]
-    CLI -->|input| Examples["examples/data/<br/>short_clip.wav"]
+Matches film cues to the best-fitting time ranges inside a composer's music library.
+
+- Library tracks are windowed at 15s, 30s, 60s, 120s with 50% overlap
+- Each window is analyzed with the same detectors used in cue analysis
+- Results stored in a local SQLite index (`backend/temp/library_index.sqlite`)
+- Matching uses cosine similarity on normalized feature vectors (BPM, key, CLAP, moods, instruments, genres)
+- Returns top N matches with time ranges, scores, and metadata
+
+---
+
+## API Endpoints
+
+**Core Pipeline:**
+- `POST /api/upload` — Upload audio/video file
+- `POST /api/segment-preview` — Phase 1 fast segmentation
+- `POST /api/analyze-cues` — Phase 2 full analysis (background job)
+- `GET /api/analysis-status/{session_id}` — Check analysis progress
+- `GET /api/projects/{session_id}` — Load analyzed project
+- `WS /ws/progress/{session_id}` — Real-time progress updates
+
+**Cue Management:**
+- `PUT /api/projects/{session_id}/cues/{cue_id}` — Update curated attributes
+- `PUT /api/projects/{session_id}/cues/{cue_id}/replacement` — Set replacement track
+
+**Library:**
+- `POST /api/library/build` — Build index from server folder
+- `POST /api/library/build-upload` — Build index from uploaded files
+- `GET /api/library/status/{job_id}` — Build progress
+- `GET /api/library/info` — Index metadata
+- `GET /api/library/sources` — Per-source stats
+- `POST /api/library/match` — Match cue to library
+- `GET /api/library/audio/{track_id}` — Serve track audio
+
+**Debug:**
+- `POST /api/debug-logs` — Receive frontend logs
+- `GET /api/debug-logs` — Retrieve debug logs
+- `DELETE /api/cleanup/{file_id}` — Remove temp files
+
+---
+
+## Running Locally
+
+**Backend** (port 8003 — hardcoded in Vite proxy, do not change):
+```bash
+cd sibyllai-web/backend && python3 -m uvicorn api.main:app --reload --host 0.0.0.0 --port 8003
 ```
+
+**Frontend** (port 5174):
+```bash
+cd sibyllai-web/frontend && npm run dev
+```
+
+Port 8001 is reserved for kazen — never use it.
 
 ---
 
 ## ⚠️ Security Notice: PyTorch Version
 
-This project currently pins `torch==2.2.2` due to compatibility requirements with other dependencies.
+This project pins `torch==2.2.2` due to compatibility requirements.
 
 - **Known vulnerability:** Remote Code Execution (RCE) via `torch.load` with `weights_only=True` (CVE-2025-32434).
-- **Mitigation:**
-  - **Do NOT load untrusted model files** using `torch.load`.
-  - Avoid using `weights_only=True` with files from untrusted sources.
-  - Only use model files you have created or that come from trusted sources.
-
-We will upgrade to a patched version as soon as compatibility allows.
-See [GitHub security advisory](https://github.com/pytorch/pytorch/security/advisories/GHSA-53qg-r3pm-6pq6) for more details.
+- **Mitigation:** Do NOT load untrusted model files. Only use model files from trusted sources.
+- We will upgrade to a patched version as soon as compatibility allows.

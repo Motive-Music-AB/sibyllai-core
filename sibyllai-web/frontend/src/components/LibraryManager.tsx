@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import type { LibrarySource, LibraryTrack } from '@/lib/types'
 
@@ -31,6 +30,10 @@ interface LibraryManagerProps {
   indexAvailable: boolean
   setIndexAvailable: (v: boolean) => void
   onBuildComplete: () => void
+  segmentationMode: 'fixed' | 'structure'
+  setSegmentationMode: (mode: 'fixed' | 'structure') => void
+  minSectionLength: number
+  setMinSectionLength: (v: number) => void
 }
 
 export function LibraryManager({
@@ -61,6 +64,10 @@ export function LibraryManager({
   indexAvailable,
   setIndexAvailable,
   onBuildComplete,
+  segmentationMode,
+  setSegmentationMode,
+  minSectionLength,
+  setMinSectionLength,
 }: LibraryManagerProps) {
   const folderInputRef = useRef<HTMLInputElement>(null)
 
@@ -147,7 +154,7 @@ export function LibraryManager({
     setWindowsIndexed(0)
     try {
       setIsUploading(true)
-      const response = await api.buildLibraryIndexUpload(libraryFiles, includeMoods, true)
+      const response = await api.buildLibraryIndexUpload(libraryFiles, includeMoods, true, segmentationMode, minSectionLength)
       setIsUploading(false)
       setBuildMessage('Building index...')
       setBuildJobId(response.job_id)
@@ -174,7 +181,7 @@ export function LibraryManager({
     setWindowsIndexed(0)
     try {
       setIsUploading(true)
-      const response = await api.buildLibraryIndexUpload(libraryFiles, includeMoods, false)
+      const response = await api.buildLibraryIndexUpload(libraryFiles, includeMoods, false, segmentationMode, minSectionLength)
       setIsUploading(false)
       setBuildMessage('Adding to library...')
       setBuildJobId(response.job_id)
@@ -215,12 +222,11 @@ export function LibraryManager({
         return next
       })
       if (expandedSource === sourceName) setExpandedSource(null)
-      // Refresh index availability
       const info = await api.getLibraryInfo()
       setIndexAvailable(info.exists && info.tracks > 0)
       onBuildComplete()
     } catch {
-      // Silently fail - could show error toast in future
+      // Silently fail
     }
   }
 
@@ -279,12 +285,12 @@ export function LibraryManager({
   }
 
   return (
-    <div className="space-y-4">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <input
         ref={folderInputRef}
         type="file"
         multiple
-        className="hidden"
+        hidden
         // @ts-expect-error webkitdirectory is non-standard but supported in Chromium
         webkitdirectory="true"
         directory=""
@@ -301,150 +307,199 @@ export function LibraryManager({
       />
 
       {/* Add to library section */}
-      <div className="glass p-6 rounded-2xl space-y-4">
-        <h3 className="text-lg font-medium font-display">Add to Library</h3>
-        <div className="flex items-center gap-2 flex-wrap">
-          <Button
-            size="sm"
-            variant="outline"
-            className="glass-lighter border-primary/20"
+      <div style={{ padding: 16, border: '1px solid #080808', borderRadius: 8 }}>
+        <div className="label" style={{ marginBottom: 12 }}>Add to Library</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn-pill"
+            style={{ height: 28, fontSize: '0.65rem' }}
             onClick={() => folderInputRef.current?.click()}
             disabled={isBuilding}
           >
             {libraryFolderName ? libraryFolderName : 'Choose Folder'}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="glass-lighter border-primary/20"
+          </button>
+          <button
+            className="btn-pill"
+            style={{ height: 28, fontSize: '0.65rem' }}
             onClick={handleBuildIndex}
             disabled={isBuilding || libraryFiles.length === 0}
           >
-            {isUploading ? 'Uploading…' : isBuilding ? 'Building…' : indexAvailable ? 'Rebuild Index' : 'Build Index'}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="glass-lighter border-primary/20"
+            {isUploading ? 'Uploading...' : isBuilding ? 'Building...' : indexAvailable ? 'Replace All' : 'Build Index'}
+          </button>
+          <button
+            className="btn-pill"
+            style={{ height: 28, fontSize: '0.65rem' }}
             onClick={handleAddToLibrary}
             disabled={isBuilding || libraryFiles.length === 0 || !indexAvailable}
           >
-            {isUploading ? 'Uploading…' : isBuilding ? 'Adding…' : 'Add Folder'}
-          </Button>
-          <label className="flex items-center gap-1.5 text-xs text-foreground-muted ml-1">
+            {isUploading ? 'Uploading...' : isBuilding ? 'Adding...' : 'Add to Library'}
+          </button>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.65rem', fontFamily: 'var(--pl-font-mono)', opacity: 0.6, marginLeft: 4, cursor: 'pointer' }}>
             <input
               type="checkbox"
               checked={includeMoods}
               onChange={(e) => setIncludeMoods(e.target.checked)}
-              className="accent-primary"
+              style={{ accentColor: '#080808' }}
             />
             Moods
           </label>
         </div>
+
+        {/* Segmentation mode toggle */}
+        <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.65rem', fontFamily: 'var(--pl-font-mono)', cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="seg-mode"
+                checked={segmentationMode === 'structure'}
+                onChange={() => setSegmentationMode('structure')}
+                disabled={isBuilding}
+                style={{ accentColor: '#080808' }}
+              />
+              Smart Sections
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.65rem', fontFamily: 'var(--pl-font-mono)', opacity: 0.6, cursor: 'pointer' }}>
+              <input
+                type="radio"
+                name="seg-mode"
+                checked={segmentationMode === 'fixed'}
+                onChange={() => setSegmentationMode('fixed')}
+                disabled={isBuilding}
+                style={{ accentColor: '#080808' }}
+              />
+              Fixed Windows
+            </label>
+          </div>
+          {segmentationMode === 'structure' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>Min length</span>
+              <input
+                type="range"
+                min={4}
+                max={30}
+                step={1}
+                value={minSectionLength}
+                onChange={(e) => setMinSectionLength(Number(e.target.value))}
+                disabled={isBuilding}
+                style={{ width: 80, accentColor: '#080808' }}
+              />
+              <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>{minSectionLength}s</span>
+            </div>
+          )}
+        </div>
+
         {/* Build progress bar */}
         {buildStatus === 'running' && (
-          <div className="space-y-1">
-            <div className="h-1.5 rounded-full bg-primary/10 overflow-hidden">
-              <div
-                className="h-full bg-primary transition-all duration-300"
-                style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }}
-              />
+          <div style={{ marginTop: 12 }}>
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${Math.min(100, Math.max(0, progressPercent))}%` }} />
             </div>
-            <p className="text-xs text-foreground-muted">
+            <p className="mono" style={{ fontSize: '0.6rem', opacity: 0.6, marginTop: 4 }}>
               {buildMessage} · {progressCurrent}/{progressTotal || '–'} tracks · {windowsIndexed} windows
             </p>
           </div>
         )}
-        {buildStatus === 'error' && <p className="text-xs text-red-400">{buildMessage}</p>}
-        {buildStatus === 'complete' && <p className="text-xs text-foreground-muted">{buildMessage}</p>}
+        {buildStatus === 'error' && (
+          <p className="mono" style={{ fontSize: '0.65rem', color: '#c00', marginTop: 8 }}>{buildMessage}</p>
+        )}
+        {buildStatus === 'complete' && (
+          <p className="mono" style={{ fontSize: '0.65rem', opacity: 0.6, marginTop: 8 }}>{buildMessage}</p>
+        )}
       </div>
 
       {/* Sources table */}
-      <div className="glass p-6 rounded-2xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-lg font-medium font-display">Indexed Sources</h3>
-          <span className="text-xs text-foreground-muted">
+      <div style={{ padding: 16, border: '1px solid #080808', borderRadius: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <span className="label">Indexed Sources</span>
+          <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>
             {sources.length} source{sources.length !== 1 ? 's' : ''}
           </span>
         </div>
 
         {sources.length === 0 ? (
-          <p className="text-sm text-foreground-muted">No sources indexed yet. Add a folder above to get started.</p>
+          <p className="mono" style={{ fontSize: '0.7rem', opacity: 0.5 }}>No sources indexed yet. Add a folder above to get started.</p>
         ) : (
-          <div className="space-y-2">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {sources.map((src) => (
-              <div key={src.source_name} className="border border-primary/15 rounded-lg overflow-hidden">
+              <div key={src.source_name} style={{ border: '1px solid rgba(8,8,8,0.2)', borderRadius: 6, overflow: 'hidden' }}>
+                {/* Source header row */}
                 <div
-                  className="flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-primary/5 transition-colors"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    transition: 'background 0.1s',
+                  }}
                   onClick={() => handleToggleSource(src.source_name)}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(8,8,8,0.03)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                 >
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs text-foreground-muted">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>
                       {expandedSource === src.source_name ? '▼' : '▶'}
                     </span>
-                    <div>
-                      <span className="text-sm font-medium">{src.source_name}</span>
-                      <span className="text-xs text-foreground-muted ml-2">{src.source_type}</span>
-                    </div>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700 }}>{src.source_name}</span>
+                    <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.4 }}>{src.source_type}</span>
                   </div>
-                  <div className="flex items-center gap-4 text-xs text-foreground-muted">
-                    <span>{src.track_count} tracks</span>
-                    <span>{src.total_windows} windows</span>
-                    <span>{formatTotalDuration(src.total_duration)}</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="glass-lighter border-red-400/30 text-red-400 hover:bg-red-400/10 h-7 px-2"
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>{src.track_count} tracks</span>
+                    <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>{src.total_windows} windows</span>
+                    <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>{formatTotalDuration(src.total_duration)}</span>
+                    <button
+                      className="btn-pill"
+                      style={{ height: 24, fontSize: '0.55rem', color: '#c00', borderColor: '#c00' }}
                       onClick={(e) => {
                         e.stopPropagation()
                         handleDeleteSource(src.source_name)
                       }}
                     >
                       Delete
-                    </Button>
+                    </button>
                   </div>
                 </div>
 
                 {/* Expanded track list */}
                 {expandedSource === src.source_name && (
-                  <div className="border-t border-primary/10 px-4 py-2 max-h-80 overflow-y-auto">
+                  <div style={{ borderTop: '1px solid rgba(8,8,8,0.1)', maxHeight: 320, overflowY: 'auto' }}>
                     {loadingTracks === src.source_name ? (
-                      <p className="text-xs text-foreground-muted py-2">Loading tracks…</p>
+                      <p className="mono" style={{ fontSize: '0.65rem', opacity: 0.5, padding: '8px 12px' }}>Loading tracks...</p>
                     ) : (sourceTracks[src.source_name] ?? []).length === 0 ? (
-                      <p className="text-xs text-foreground-muted py-2">No tracks found.</p>
+                      <p className="mono" style={{ fontSize: '0.65rem', opacity: 0.5, padding: '8px 12px' }}>No tracks found.</p>
                     ) : (
-                      <table className="w-full text-xs">
+                      <table style={{ width: '100%', fontSize: '0.65rem', fontFamily: 'var(--pl-font-mono)', borderCollapse: 'collapse' }}>
                         <thead>
-                          <tr className="text-foreground-muted text-left">
-                            <th className="py-1 pr-4 font-normal">Filename</th>
-                            <th className="py-1 pr-4 font-normal w-20">Duration</th>
-                            <th className="py-1 pr-4 font-normal w-20">Size</th>
-                            <th className="py-1 pr-4 font-normal w-16">Windows</th>
-                            <th className="py-1 font-normal w-16"></th>
+                          <tr style={{ textAlign: 'left', opacity: 0.5 }}>
+                            <th style={{ padding: '6px 12px', fontWeight: 400 }}>Filename</th>
+                            <th style={{ padding: '6px 8px', fontWeight: 400, width: 60 }}>Duration</th>
+                            <th style={{ padding: '6px 8px', fontWeight: 400, width: 60 }}>Size</th>
+                            <th style={{ padding: '6px 8px', fontWeight: 400, width: 50 }}>Windows</th>
+                            <th style={{ padding: '6px 8px', fontWeight: 400, width: 50 }}></th>
                           </tr>
                         </thead>
                         <tbody>
                           {(sourceTracks[src.source_name] ?? []).map((track) => (
-                            <tr key={track.id} className="border-t border-primary/5">
-                              <td className="py-1.5 pr-4 truncate max-w-[300px]" title={track.path}>
+                            <tr key={track.id} style={{ borderTop: '1px solid rgba(8,8,8,0.06)' }}>
+                              <td style={{ padding: '6px 12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 300 }} title={track.path}>
                                 {track.filename}
                               </td>
-                              <td className="py-1.5 pr-4 text-foreground-muted">
+                              <td style={{ padding: '6px 8px', opacity: 0.6 }}>
                                 {formatDuration(track.duration)}
                               </td>
-                              <td className="py-1.5 pr-4 text-foreground-muted">
+                              <td style={{ padding: '6px 8px', opacity: 0.6 }}>
                                 {formatSize(track.size)}
                               </td>
-                              <td className="py-1.5 pr-4 text-foreground-muted">{track.window_count}</td>
-                              <td className="py-1.5">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="glass-lighter border-primary/20 h-6 px-2 text-[10px]"
+                              <td style={{ padding: '6px 8px', opacity: 0.6 }}>{track.window_count}</td>
+                              <td style={{ padding: '6px 8px' }}>
+                                <button
+                                  className="btn-pill"
+                                  style={{ height: 22, fontSize: '0.55rem', padding: '0 8px' }}
                                   onClick={() => playTrack(track.id)}
                                 >
                                   {playingTrackId === track.id ? 'Stop' : 'Play'}
-                                </Button>
+                                </button>
                               </td>
                             </tr>
                           ))}

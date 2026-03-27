@@ -66,6 +66,17 @@ def _ensure_track_columns(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE tracks ADD COLUMN source_type TEXT")
 
 
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    """Add structure-segmentation columns to windows table (backward-compatible)."""
+    cols = _get_table_columns(conn, "windows")
+    if "segment_type" not in cols:
+        conn.execute("ALTER TABLE windows ADD COLUMN segment_type TEXT DEFAULT 'fixed'")
+    if "section_index" not in cols:
+        conn.execute("ALTER TABLE windows ADD COLUMN section_index INTEGER")
+    if "total_sections" not in cols:
+        conn.execute("ALTER TABLE windows ADD COLUMN total_sections INTEGER")
+
+
 def _load_yamnet_class_names() -> list[str]:
     import pandas as pd
     import urllib.request
@@ -291,6 +302,23 @@ def _iter_windows(duration: float, window_sizes: list[float], hop_ratio: float) 
     return windows
 
 
+def _iter_sections(
+    audio: np.ndarray,
+    sr: int,
+    min_section_length: float = 8.0,
+    sensitivity: float = 1.0,
+) -> list[tuple[float, float]]:
+    """Detect structural sections and return (start, end) pairs."""
+    from sibyllai_core.detectors.structure import detect_sections_with_fallback
+
+    sections = detect_sections_with_fallback(
+        audio, sr,
+        min_section_length=min_section_length,
+        sensitivity=sensitivity,
+    )
+    return [(sec.start, sec.end) for sec in sections]
+
+
 def _load_audio(file_path: Path) -> tuple[np.ndarray, int]:
     import librosa
     import soundfile as sf
@@ -393,6 +421,9 @@ def init_index(
     hop_ratio: float | None = None,
     source_name: str | None = None,
     source_type: str | None = None,
+    segmentation_mode: str = "fixed",
+    min_section_length: float = 8.0,
+    sensitivity: float = 1.0,
 ) -> None:
     _ensure_parent(db_path)
     if reset and db_path.exists():
@@ -432,13 +463,16 @@ def init_index(
                 arousal REAL,
                 vector_json TEXT NOT NULL,
                 features_json TEXT NOT NULL,
+                segment_type TEXT DEFAULT 'fixed',
+                section_index INTEGER,
+                total_sections INTEGER,
                 FOREIGN KEY(track_id) REFERENCES tracks(id)
             )
             """
         )
 
         meta = {
-            "schema_version": 1,
+            "schema_version": 2,
             "clap_order": schema.clap_order,
             "instrument_labels": schema.instrument_labels,
             "genre_labels": schema.genre_labels,
@@ -452,6 +486,9 @@ def init_index(
             "built_at": datetime.utcnow().isoformat(),
             "source_name": source_name,
             "source_type": source_type,
+            "segmentation_mode": segmentation_mode,
+            "min_section_length": min_section_length,
+            "sensitivity": sensitivity,
         }
         for key, value in meta.items():
             conn.execute(
@@ -471,6 +508,9 @@ def build_library_index(
     source_name: str | None = None,
     source_type: str | None = None,
     dedupe_simple: bool = True,
+    segmentation_mode: str = "fixed",
+    min_section_length: float = 8.0,
+    sensitivity: float = 1.0,
 ) -> dict:
     schema = _build_schema()
     window_sizes = window_sizes or DEFAULT_WINDOW_SIZES
@@ -483,6 +523,9 @@ def build_library_index(
         hop_ratio=hop_ratio,
         source_name=source_name,
         source_type=source_type,
+        segmentation_mode=segmentation_mode,
+        min_section_length=min_section_length,
+        sensitivity=sensitivity,
     )
 
     audio_exts = {".wav", ".mp3", ".m4a", ".flac", ".aiff", ".aif"}
@@ -504,6 +547,7 @@ def build_library_index(
 
     with sqlite3.connect(db_path) as conn:
         _ensure_track_columns(conn)
+        _migrate_schema(conn)
         existing_keys: set[tuple[str, int]] = set()
         if dedupe_simple and not reset:
             cols = _get_table_columns(conn, "tracks")
@@ -565,41 +609,87 @@ def build_library_index(
             if dedupe_simple and not reset:
                 existing_keys.add((file_name, file_size))
 
-            windows = _iter_windows(duration, window_sizes, hop_ratio)
-            for start, end, size in windows:
-                start_idx = int(start * sr)
-                end_idx = int(end * sr)
-                chunk = audio[start_idx:end_idx]
-                if len(chunk) == 0:
-                    continue
+            if segmentation_mode == "structure":
+                sections = _iter_sections(audio, sr, min_section_length, sensitivity)
+                total_sections = len(sections)
+                for sec_idx, (sec_start, sec_end) in enumerate(sections):
+                    start_idx = int(sec_start * sr)
+                    end_idx = int(sec_end * sr)
+                    chunk = audio[start_idx:end_idx]
+                    if len(chunk) == 0:
+                        continue
 
-                features = _extract_features_for_window(chunk, sr, temp_dir, include_moods=include_moods)
-                vector = build_vector_from_features(features, schema, include_moods=include_moods)
+                    features = _extract_features_for_window(chunk, sr, temp_dir, include_moods=include_moods)
+                    vector = build_vector_from_features(features, schema, include_moods=include_moods)
 
-                conn.execute(
-                    """
-                    INSERT INTO windows (
-                        id, track_id, start, end, duration, window_size,
-                        bpm, key, valence, arousal,
-                        vector_json, features_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        uuid.uuid4().hex,
-                        track_id,
-                        start,
-                        end,
-                        end - start,
-                        size,
-                        features.get("bpm") if features.get("bpm") != "Unknown" else None,
-                        features.get("key"),
-                        features.get("valence"),
-                        features.get("arousal"),
-                        json.dumps(vector),
-                        json.dumps(features),
-                    ),
-                )
-                window_count += 1
+                    conn.execute(
+                        """
+                        INSERT INTO windows (
+                            id, track_id, start, end, duration, window_size,
+                            bpm, key, valence, arousal,
+                            vector_json, features_json,
+                            segment_type, section_index, total_sections
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            uuid.uuid4().hex,
+                            track_id,
+                            sec_start,
+                            sec_end,
+                            sec_end - sec_start,
+                            -1.0,  # variable-length sections
+                            features.get("bpm") if features.get("bpm") != "Unknown" else None,
+                            features.get("key"),
+                            features.get("valence"),
+                            features.get("arousal"),
+                            json.dumps(vector),
+                            json.dumps(features),
+                            "structure",
+                            sec_idx,
+                            total_sections,
+                        ),
+                    )
+                    window_count += 1
+            else:
+                windows = _iter_windows(duration, window_sizes, hop_ratio)
+                for start, end, size in windows:
+                    start_idx = int(start * sr)
+                    end_idx = int(end * sr)
+                    chunk = audio[start_idx:end_idx]
+                    if len(chunk) == 0:
+                        continue
+
+                    features = _extract_features_for_window(chunk, sr, temp_dir, include_moods=include_moods)
+                    vector = build_vector_from_features(features, schema, include_moods=include_moods)
+
+                    conn.execute(
+                        """
+                        INSERT INTO windows (
+                            id, track_id, start, end, duration, window_size,
+                            bpm, key, valence, arousal,
+                            vector_json, features_json,
+                            segment_type, section_index, total_sections
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            uuid.uuid4().hex,
+                            track_id,
+                            start,
+                            end,
+                            end - start,
+                            size,
+                            features.get("bpm") if features.get("bpm") != "Unknown" else None,
+                            features.get("key"),
+                            features.get("valence"),
+                            features.get("arousal"),
+                            json.dumps(vector),
+                            json.dumps(features),
+                            "fixed",
+                            None,
+                            None,
+                        ),
+                    )
+                    window_count += 1
 
             if progress_callback:
                 progress_callback({
@@ -620,6 +710,7 @@ def build_library_index(
         "vector_dim": schema.vector_dim,
         "source_name": source_name,
         "source_type": source_type,
+        "segmentation_mode": segmentation_mode,
     }
 
 
@@ -660,6 +751,7 @@ def get_library_info(db_path: Path) -> dict:
         "tracks": track_count,
         "windows": window_count,
         "meta": meta,
+        "segmentation_mode": meta.get("segmentation_mode", "fixed"),
     }
 
 
@@ -785,29 +877,66 @@ def match_cue_to_library(
     window_sizes: list[float] | None = None,
     unique_tracks: bool = True,
     include_features: bool = False,
+    duration_weight: float = 0.1,
+    duration_tolerance: float = 2.0,
 ) -> list[dict]:
     if not db_path.exists():
         raise FileNotFoundError(db_path)
 
-    window_sizes = window_sizes or DEFAULT_WINDOW_SIZES
-    target = min(window_sizes, key=lambda w: abs(w - cue_length))
+    # Auto-detect segmentation mode from DB meta
+    meta = load_meta_from_db(db_path)
+    seg_mode = meta.get("segmentation_mode", "fixed")
+
+    _select_cols = """
+        w.id, w.track_id, w.start, w.end, w.duration, w.window_size,
+        w.vector_json, w.features_json, t.path
+    """
 
     with sqlite3.connect(db_path) as conn:
-        rows = conn.execute(
-            """
-            SELECT w.id, w.track_id, w.start, w.end, w.duration, w.window_size,
-                   w.vector_json, w.features_json, t.path
-            FROM windows w
-            JOIN tracks t ON t.id = w.track_id
-            WHERE w.window_size = ?
-            """,
-            (target,),
-        ).fetchall()
+        _migrate_schema(conn)
+
+        if seg_mode == "structure":
+            # Query all structure-type windows (variable duration)
+            rows = conn.execute(
+                f"""
+                SELECT {_select_cols},
+                       w.segment_type, w.section_index, w.total_sections
+                FROM windows w
+                JOIN tracks t ON t.id = w.track_id
+                WHERE w.segment_type = 'structure'
+                """,
+            ).fetchall()
+        else:
+            window_sizes = window_sizes or DEFAULT_WINDOW_SIZES
+            target = min(window_sizes, key=lambda w: abs(w - cue_length))
+            rows = conn.execute(
+                f"""
+                SELECT {_select_cols},
+                       w.segment_type, w.section_index, w.total_sections
+                FROM windows w
+                JOIN tracks t ON t.id = w.track_id
+                WHERE w.window_size = ?
+                """,
+                (target,),
+            ).fetchall()
 
     scored = []
     for row in rows:
         vector = json.loads(row[6])
-        score = _cosine_similarity(cue_vector, vector)
+        cosine_score = _cosine_similarity(cue_vector, vector)
+
+        # Duration similarity penalty for structure mode
+        if seg_mode == "structure" and duration_weight > 0 and cue_length > 0:
+            win_duration = row[4]
+            if win_duration > 0:
+                ratio = max(cue_length, win_duration) / min(cue_length, win_duration)
+                duration_penalty = max(0.0, 1.0 - (ratio - 1.0) / duration_tolerance)
+            else:
+                duration_penalty = 0.0
+            final_score = (1.0 - duration_weight) * cosine_score + duration_weight * duration_penalty
+        else:
+            final_score = cosine_score
+
         entry = {
             "window_id": row[0],
             "track_id": row[1],
@@ -816,7 +945,10 @@ def match_cue_to_library(
             "end": row[3],
             "duration": row[4],
             "window_size": row[5],
-            "score": score,
+            "score": final_score,
+            "segment_type": row[9],
+            "section_index": row[10],
+            "total_sections": row[11],
         }
         if include_features:
             entry["features"] = json.loads(row[7])

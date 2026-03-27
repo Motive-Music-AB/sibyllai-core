@@ -12,6 +12,7 @@ from sibyllai_core.detectors.yamnet_segmenter import extract_instruments, extrac
 from sibyllai_core.detectors.chord_detector import analyze_chords
 from sibyllai_core.detectors import music_probability, tag_chunk
 from sibyllai_core.detectors.m2e_wrapper import global_moods
+from sibyllai_core.detectors.structure import detect_sections_with_fallback
 from sibyllai_core.sibyl_format import create_cue, create_project, save_project
 
 
@@ -33,13 +34,56 @@ def _bpm_track(y, sr):
     return es.RhythmExtractor2013(method="multifeature")(y)[0]
 
 
+def _analyze_section_lightweight(chunk, sr):
+    """
+    Run fast detectors on a sub-section of a cue.
+
+    Returns energy label, BPM, and key. Skips YAMNet instruments/genres
+    and Music2Emo (too slow for sub-sections).
+    """
+    result = {
+        "energy_label": "unknown",
+        "clap_energy": {},
+        "bpm": None,
+        "key": None,
+    }
+
+    # CLAP energy tags
+    try:
+        clap = tag_chunk(chunk, sr)
+        energy_scores = clap.get("energy", {})
+        result["clap_energy"] = energy_scores
+        if energy_scores:
+            result["energy_label"] = max(energy_scores, key=energy_scores.get)
+    except Exception:
+        pass
+
+    # BPM
+    try:
+        result["bpm"] = _bpm_track(chunk, sr)
+    except Exception:
+        pass
+
+    # Key
+    try:
+        from sibyllai_core.detectors.chord_detector import analyze_chords
+        chord_analysis = analyze_chords(audio_data=chunk, sr=sr)
+        key = chord_analysis.get("key", "Unknown")
+        result["key"] = key if key != "Unknown" else None
+    except Exception:
+        pass
+
+    return result
+
+
 def analyze_segments(
     audio_path: str | Path,
     segments: list[tuple[float, float]],
     output_dir: str | Path,
     fps: int = 25,
     thr: float = 0.5,
-    progress_callback: Optional[Callable[[int, int, str], None]] = None
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    mix_type: str = "full_mix"
 ) -> dict:
     """
     Run full analysis on confirmed segments.
@@ -126,13 +170,16 @@ def analyze_segments(
             except Exception as e:
                 print(f"[WARNING] Genre extraction failed for segment {segment_num}: {e}")
 
-            # Music probability
-            try:
-                if progress_callback:
-                    progress_callback(base_step + 4, total_steps, f"Segment {segment_num}: Checking music probability")
-                music_prob = music_probability(music_mono, sr)
-            except Exception as e:
-                print(f"[WARNING] Music probability analysis failed for segment {segment_num}: {e}")
+            # Music probability (skip for clean MX — we already know it's music)
+            if mix_type == "clean_mx":
+                music_prob = 1.0
+            else:
+                try:
+                    if progress_callback:
+                        progress_callback(base_step + 4, total_steps, f"Segment {segment_num}: Checking music probability")
+                    music_prob = music_probability(music_mono, sr)
+                except Exception as e:
+                    print(f"[WARNING] Music probability analysis failed for segment {segment_num}: {e}")
 
             # CLAP tags
             try:
@@ -175,14 +222,46 @@ def analyze_segments(
                 top_moods = predicted_moods[:3] if predicted_moods else []
                 moods_str = ", ".join(top_moods) if top_moods else "Unknown"
 
-                valence = mood_result.get('valence', 0.0)
-                arousal = mood_result.get('arousal', 0.0)
+                # Music2Emo returns 1-9 scale (Russell's circumplex); normalize to 0-1
+                raw_val = mood_result.get('valence', 5.0)
+                raw_aro = mood_result.get('arousal', 5.0)
+                valence = max(0.0, min(1.0, (raw_val - 1.0) / 8.0))
+                arousal = max(0.0, min(1.0, (raw_aro - 1.0) / 8.0))
 
                 if segment_path.exists():
                     segment_path.unlink()
 
             except Exception as e:
                 print(f"[WARNING] Music2Emotion analysis failed for segment {i}: {e}")
+
+            # Structure detection (internal sections within this cue)
+            sections_data = []
+            min_section_length = 8.0
+            cue_duration = end - start
+            try:
+                if cue_duration >= min_section_length * 2:
+                    sections = detect_sections_with_fallback(
+                        music_mono, sr, min_section_length=min_section_length
+                    )
+                    if len(sections) > 1:
+                        for sec_idx, sec in enumerate(sections):
+                            sec_start_sample = int(sec.start * sr)
+                            sec_end_sample = int(sec.end * sr)
+                            sec_chunk = music_mono[sec_start_sample:sec_end_sample]
+                            if len(sec_chunk) == 0:
+                                continue
+                            sec_analysis = _analyze_section_lightweight(sec_chunk, sr)
+                            sections_data.append({
+                                "index": sec_idx,
+                                "start": start + sec.start,
+                                "end": start + sec.end,
+                                "start_relative": sec.start,
+                                "end_relative": sec.end,
+                                "duration": sec.duration,
+                                **sec_analysis,
+                            })
+            except Exception as e:
+                print(f"[WARNING] Structure detection failed for segment {segment_num}: {e}")
 
             # Create cue structure
             cue_id = f"cue_{i:03d}"
@@ -201,6 +280,7 @@ def analyze_segments(
                 valence=valence,
                 arousal=arousal,
                 clap_categorized=clap_categorized,
+                sections=sections_data,
             )
             cues.append(cue)
 

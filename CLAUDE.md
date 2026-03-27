@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SibyllAI Core is a music analysis tool for film composers, designed to analyze temp music (MX) tracks and extract comprehensive musical characteristics. The primary use case is **pre-scoring analysis**: composers receive temp MX from editors and use SibyllAI to understand what musical elements (genre, instrumentation, mood, energy) the director responded to, informing their original compositions.
 
-**Current Status:** MVP backend complete and tested on production files (89-minute feature film MX). Ready for web UI development.
+**Current Status:** MVP complete — web UI with two-phase analysis, library matching/track replacement, and brutalist design system.
 
-**Future Vision:** Reverse lookup capability - match detected musical profiles against composer's personal music library to suggest similar unused tracks/demos.
+**Track Replacement:** Reverse lookup capability — match detected musical profiles against composer's personal music library to suggest similar unused tracks/demos. MVP implemented with SQLite-backed library index and cosine similarity matching.
 
 ## Tech Stack
 
@@ -16,7 +16,7 @@ SibyllAI Core is a music analysis tool for film composers, designed to analyze t
 - PyTorch 2.2.2 (pinned for compatibility; has known RCE vulnerability via torch.load - only use trusted model files)
 - TensorFlow & Keras (for YAMNet)
 - YAMNet (music cue segmentation + instrument detection from 521 audio event classes)
-- CLAP (LAION-CLAP for genre, production style, energy, era classification - 25-30 categorized tags)
+- CLAP (LAION-CLAP for genre, production style, energy, era, function, instrumentation — 37 categorized tags)
 - Music2Emo (mood/emotion analysis: valence, arousal, mood tags)
 - Essentia (rhythm/BPM extraction)
 - Librosa (audio processing, resampling)
@@ -89,18 +89,24 @@ The system follows a sequential processing pipeline:
    - Creates temporary working directory
 
 3. **Music Cue Detection** (`detectors/yamnet_segmenter.py`):
-   - Uses YAMNet to identify where music starts and stops (cue boundaries)
+   - Two modes: YAMNet classification (Full Mix) or RMS amplitude (Clean MX)
    - Returns list of (start, end) time ranges in seconds
    - Filters segments shorter than 3 seconds (minimum cue length)
 
 4. **Feature Analysis** (per detected cue):
-   - **BPM Analysis**: Uses Essentia RhythmExtractor2013
-   - **Key Detection**: Analyzes harmonic content
-   - **Instrument Detection**: Extracts top 3-5 instruments from YAMNet's 521 audio event classes
-   - **Genre/Style Tags**: CLAP analysis across 25-30 categorized tags (genre, production, energy, era, function)
+   - **BPM Analysis**: Uses Essentia RhythmExtractor2013 (requires 44100 Hz)
+   - **Key Detection**: Chord/key detection
+   - **Instrument Detection**: YAMNet — top 15 from 521 audio event classes (includes vocals: Singing, Humming, Choir, etc.)
+   - **Genre Detection**: YAMNet — Pop, Rock, Jazz, Electronic, Classical, Hip hop, Country, etc.
+   - **Style/Tags**: CLAP analysis across 37 categorized tags (genre, production, energy, era, function, instrumentation)
    - **Mood Analysis**: Music2Emo model for valence, arousal, and mood tags
+   - **Structure Detection**: Spectral novelty change-point detection for internal section boundaries (intro, verse, chorus, bridge, build-up, climax)
 
-5. **Output Generation**:
+5. **Per-Section Lightweight Analysis** (for cues >16s):
+   - Each detected section gets energy label (CLAP), BPM, and key
+   - Section data stored with absolute and relative timestamps in `musical_profile.sections[]`
+
+6. **Output Generation**:
    - Creates incremental run folders: `outputs/run_001/`, `outputs/run_002/`, etc.
    - Saves project file: `project.sibyl.json` with comprehensive cue data
    - Structured format separates universal musical attributes from project-specific context
@@ -109,7 +115,14 @@ The system follows a sequential processing pipeline:
 
 **Detectors Module** (`src/sibyllai_core/detectors/`):
 - Each detector provides standalone analysis functionality
-- Exports are consolidated in `__init__.py`: `music_probability`, `tag_chunk`, `global_moods`
+- Exports consolidated in `__init__.py`: `music_probability`, `tag_chunk`, `global_moods`, `detect_sections`, `detect_sections_with_fallback`, `Section`
+- Key files:
+  - `yamnet_segmenter.py` — `segment_music_regions()`, `extract_instruments()`, `extract_genres()`
+  - `clap.py` — `tag_chunk()` (37 categorized audio-text tags)
+  - `m2e_wrapper.py` — `global_moods()` (valence, arousal, mood tags)
+  - `chord_detector.py` — Key detection
+  - `structure.py` — `detect_sections()`, `detect_sections_with_fallback()` (spectral novelty + agglomerative fallback)
+  - `ast.py` — `music_probability()` (legacy audio spectrogram transformer)
 - Detectors are designed to be independent and resilient (failures are caught and logged)
 
 **Music2Emo Integration** (`src/sibyllai_core/thirdparty/music2emo/`):
@@ -126,12 +139,16 @@ Each detected music cue contains two main sections:
 1. **`musical_profile`** - Universal musical attributes (used for future library matching):
    - **`detected`**: Comprehensive AI analysis with confidence scores
      - YAMNet instruments (all detected with confidence)
+     - YAMNet genres (all detected with confidence)
      - Music2Emo moods (all detected with confidence)
-     - CLAP tags organized by category: genre, production, energy, era, function
+     - CLAP tags organized by category: genre, production, energy, era, function, instrumentation
    - **`curated`**: User-approved subset of detected attributes
-     - Top 3 instruments, top 2-3 per CLAP category
+     - Top instruments, genres, moods, style, energy, era, etc.
      - User can promote/demote/remove via UI
    - **Musical fundamentals**: BPM, key, valence (0-1), arousal (0-1)
+   - **`sections`**: Internal structure boundaries (for cues >16s)
+     - Each section: index, start/end (absolute + relative), duration
+     - Lightweight analysis: energy_label, clap_energy, bpm, key
 
 2. **`project_context`** - Project-specific metadata (NOT used for matching):
    - Custom tags (e.g., "Hero's theme", "Director's favorite")
@@ -140,7 +157,19 @@ Each detected music cue contains two main sections:
    - Status (draft/review/locked)
    - Director feedback
 
-This separation allows future reverse-lookup: "Find tracks in my library matching this cue's musical_profile"
+This separation enables reverse-lookup: "Find tracks in my library matching this cue's musical_profile" (implemented as Track Replacement MVP).
+
+**Web UI Components:**
+- `MotivePipeline.tsx` — Primary view: upload, waveform, threshold tuning, cue cards
+- `WaveformViewer.tsx` — WaveSurfer.js waveform with zoom, segments, playback, segment label lane
+- `CueCard.tsx` — Per-cue analysis results (instruments, genres, style, mood, BPM, key)
+- `TrackReplacement.tsx` — Library upload, cue matching, match details
+- `CueSynch.tsx` — CSV cue marker import/synchronization
+- `LibraryManager.tsx` — Library index management
+- `LicensingPage.tsx` — Licensing cost calculator
+- `LoginScreen.tsx` — Authentication
+- `ProjectsPage.tsx` — Project listing and selection
+- `AddItemCombobox.tsx` — Tag editing combobox for curated attributes
 
 ## Dependency Management
 
@@ -319,8 +348,8 @@ Each run creates an incremental folder to avoid overwriting previous analyses.
 
 **Major Performance Improvement:**
 - Removed Demucs source separation (10-100x speed improvement)
-- Pipeline now processes 89-minute files in ~7 minutes
-- Suitable for production feature film MX analysis
+- Significant speed improvement from removing Demucs
+- Significant speed improvement from removing Demucs
 
 **Enhanced CLAP Analysis:**
 - Expanded from 5 to 37 categorized tags
@@ -355,8 +384,5 @@ Each run creates an incremental folder to avoid overwriting previous analyses.
 - Kept only key detection for cleaner, more reliable results
 
 **Testing & Validation:**
-- Successfully tested on 89-minute feature film MX
-- 73 music regions detected
-- Accurate genre/mood/energy classification for film scores
-- All models (YAMNet, CLAP, Music2Emo, Essentia) working correctly
+- All models (YAMNet, CLAP, Music2Emo, Essentia) working on test files
 - always use port 8003 for this app (port 8001 is reserved for kazen — never kill it)

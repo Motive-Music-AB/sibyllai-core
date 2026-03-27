@@ -2,8 +2,6 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import WaveSurfer from 'wavesurfer.js'
 import RegionsPlugin, { type Region } from 'wavesurfer.js/dist/plugins/regions'
-import { Card, CardContent } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 import { generateTicks, secondsToTimecode } from '@/lib/timecode'
 import type { Cue } from '@/lib/types'
@@ -12,7 +10,27 @@ import type { Cue } from '@/lib/types'
 // Reduced max zoom to prevent slow renders. 200 px/sec gives 8+ pixels per frame at 24fps.
 const ZOOM_LEVELS = [0, 10, 25, 50, 100, 200]
 
-export function WaveformViewer() {
+function getEnergyOverlayColor(label: string): string {
+  const lower = label.toLowerCase()
+  if (lower.includes('climactic') || lower.includes('aggressive') || lower.includes('high energy')) {
+    return 'rgba(20, 20, 20, 0.32)'
+  }
+  if (lower.includes('building tension')) return 'rgba(20, 20, 20, 0.24)'
+  if (lower.includes('gentle') || lower.includes('low energy')) return 'rgba(20, 20, 20, 0.14)'
+  return 'rgba(20, 20, 20, 0.2)'
+}
+
+interface WaveformViewerProps {
+  linkedSectionIndex?: number | null
+  onLinkedSectionHover?: (idx: number | null) => void
+  onLinkedSectionSelect?: (idx: number | null) => void
+}
+
+export function WaveformViewer({
+  linkedSectionIndex = null,
+  onLinkedSectionHover,
+  onLinkedSectionSelect,
+}: WaveformViewerProps = {}) {
   const waveformRef = useRef<HTMLDivElement>(null)
   const wavesurferRef = useRef<WaveSurfer | null>(null)
   const regionsRef = useRef<RegionsPlugin | null>(null)
@@ -39,6 +57,7 @@ export function WaveformViewer() {
   const [isReady, setIsReady] = useState(false)
   const [waveformVersion, setWaveformVersion] = useState(0) // Increments after peak optimization to trigger region recreation
   const [zoom, setZoom] = useState(0)
+  const [currentTime, setCurrentTime] = useState(0)
   const [currentTimecode, setCurrentTimecode] = useState<string>('')
   // Combined state for ruler data - prevents double renders when updating width and ticks
   const [rulerData, setRulerData] = useState<{
@@ -86,9 +105,9 @@ export function WaveformViewer() {
     // Create WaveSurfer instance
     const ws = WaveSurfer.create({
       container: waveformRef.current,
-      waveColor: ['#FFF2D9', '#F5B85A', '#E8943A'],
-      progressColor: ['#FFFAF0', '#FFD080', '#F0A54A'],
-      cursorColor: '#E8943A',
+      waveColor: '#333',
+      progressColor: '#555',
+      cursorColor: '#080808',
       barWidth: 3,
       barGap: 1,
       barRadius: 2,
@@ -109,6 +128,7 @@ export function WaveformViewer() {
     // Event handlers
     ws.on('ready', () => {
       setIsReady(true)
+      setCurrentTime(0)
       setCurrentTimecode(secondsToTimecode(0, framerate, startTimecode))
 
       // Performance: Replace full-resolution decoded data with downsampled peaks
@@ -144,15 +164,18 @@ export function WaveformViewer() {
       const now = Date.now()
       if (now - lastTimecodeUpdateRef.current < 50) return
       lastTimecodeUpdateRef.current = now
+      setCurrentTime(currentTime)
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
     })
 
     ws.on('seeking', (currentTime) => {
+      setCurrentTime(currentTime)
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
     })
 
     ws.on('interaction', () => {
       const currentTime = ws.getCurrentTime()
+      setCurrentTime(currentTime)
       setCurrentTimecode(secondsToTimecode(currentTime, framerate, startTimecode))
     })
 
@@ -400,18 +423,18 @@ export function WaveformViewer() {
       const cue = findCueForSegmentRef.current(start, end)
       const isActive = cue && activeCueId === cue.id
 
-      // Determine color based on state
+      // Determine color based on state (monochrome brutalist)
       let color: string
       if (project && !cue) {
-        color = 'rgba(40, 40, 40, 0.6)' // Greyed out for unanalyzed segments
+        color = 'rgba(200, 200, 200, 0.4)' // Faded for unanalyzed segments
       } else if (isActive) {
-        color = 'rgba(59, 130, 246, 0.5)' // Bright blue for active
+        color = 'rgba(8, 8, 8, 0.2)' // Dark overlay for active cue
       } else if (project && cue) {
-        color = 'rgba(232, 148, 58, 0.08)' // Subtle warm tint for analyzed cues
+        color = 'rgba(8, 8, 8, 0.06)' // Subtle tint for analyzed cues
       } else if (selected) {
-        color = 'rgba(34, 197, 94, 0.25)' // Green for selected
+        color = 'rgba(8, 8, 8, 0.12)' // Medium overlay for selected
       } else {
-        color = 'rgba(40, 40, 40, 0.5)' // Greyed out for unselected
+        color = 'rgba(200, 200, 200, 0.4)' // Faded for unselected
       }
 
       // Enable dragging/resizing only before analysis
@@ -429,8 +452,8 @@ export function WaveformViewer() {
       // Add event handlers
       if (region && region.element) {
         // Add visual separation between adjacent cues (border on both sides)
-        region.element.style.borderLeft = '2px solid rgba(100, 116, 139, 0.6)'
-        region.element.style.borderRight = '2px solid rgba(100, 116, 139, 0.6)'
+        region.element.style.borderLeft = '1px solid rgba(8, 8, 8, 0.4)'
+        region.element.style.borderRight = '1px solid rgba(8, 8, 8, 0.4)'
         region.element.style.boxSizing = 'border-box'
 
         // Click handler - use ref to get latest callback
@@ -576,7 +599,7 @@ export function WaveformViewer() {
 
       // Enable drag selection for creating new regions
       regionsRef.current.enableDragSelection({
-        color: 'rgba(148, 163, 184, 0.2)',
+        color: 'rgba(8, 8, 8, 0.1)',
       })
 
       // Listen for user-created regions (drag-to-create)
@@ -770,35 +793,41 @@ export function WaveformViewer() {
     return null
   }
 
+  const activeCue = project?.cues.find((cue) => cue.id === activeCueId) ?? null
+  const activeSections = activeCue?.musical_profile.sections ?? []
+  const hasLinkedSections = Boolean(activeCue && activeSections.length > 1)
+
   return (
-    <Card className="w-full border-white/10 shadow-none waveform-card">
-      <CardContent className="pt-4">
-        <div className="space-y-4">
-          {/* Nav toolbar */}
-          <div className="flex items-center justify-between">
-            <div>
-              {currentPage === 'analysis' && !project && (
-                <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
-                  ← Back
-                </Button>
-              )}
-              {currentPage === 'analysis' && project && (
-                <Button variant="outline" size="sm" onClick={resetToSegmentation} className="glass-lighter border-primary/20">
-                  ← Back
-                </Button>
-              )}
-              {(currentPage === 'cuesynch' || currentPage === 'replacement' || currentPage === 'licensing') && (
-                <Button variant="outline" size="sm" onClick={() => setCurrentPage('analysis')} className="glass-lighter border-primary/20">
-                  ← Back
-                </Button>
-              )}
+    <div className="wv-root">
+      <div className="wv-body">
+          {/* Nav toolbar — only shown on sub-pages, not inside pipeline */}
+          {currentPage !== 'pipeline' && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid #080808' }}>
+              <div>
+                {currentPage === 'analysis' && !project && (
+                  <button className="btn-pill" style={{ height: 28, fontSize: '0.65rem' }} onClick={reset}>
+                    ← Back
+                  </button>
+                )}
+                {currentPage === 'analysis' && project && (
+                  <button className="btn-pill" style={{ height: 28, fontSize: '0.65rem' }} onClick={resetToSegmentation}>
+                    ← Back
+                  </button>
+                )}
+                {(currentPage === 'cuesynch' || currentPage === 'replacement' || currentPage === 'licensing') && (
+                  <button className="btn-pill" style={{ height: 28, fontSize: '0.65rem' }} onClick={() => setCurrentPage('analysis')}>
+                    ← Back
+                  </button>
+                )}
+              </div>
+              <button className="btn-pill" style={{ height: 28, fontSize: '0.65rem' }} onClick={reset}>
+                New Import
+              </button>
             </div>
-            <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
-              New Import
-            </Button>
-          </div>
+          )}
           <div
-            className="overflow-x-auto rounded-lg bg-[hsla(0,0%,15%,0.35)] relative waveform-scroll-container"
+            className="overflow-x-auto relative waveform-scroll-container"
+            style={{ background: '#E8E8E8' }}
           >
             {/* Wrapper that contains both ruler and waveform - scrolls as one unit */}
             <div
@@ -828,8 +857,10 @@ export function WaveformViewer() {
                 return (
                   <div
                     ref={rulerRef}
-                    className="relative h-8 bg-[hsla(0,0%,15%,0.5)] border-b border-white/10"
+                    className="relative h-8"
                     style={{
+                      background: '#D8D8D8',
+                      borderBottom: '1px solid #080808',
                       width: zoom === 0 ? '100%' : `${displayWidth}px`,
                       minWidth: zoom === 0 ? '100%' : `${displayWidth}px`,
                     }}
@@ -843,18 +874,24 @@ export function WaveformViewer() {
                       >
                         {/* Tick mark */}
                         <div
-                          className="bg-foreground/40"
                           style={{
                             width: '1px',
                             height: tick.isMajor ? '12px' : '6px',
+                            background: 'rgba(8,8,8,0.4)',
                           }}
                         />
                         {/* Timecode label (only on major ticks) */}
                         {tick.isMajor && (
                           <div
-                            className={`absolute top-3 text-xs text-foreground/60 whitespace-nowrap ${
-                              index === 0 ? '' : '-translate-x-1/2'
-                            }`}
+                            style={{
+                              position: 'absolute',
+                              top: '12px',
+                              fontSize: '0.65rem',
+                              fontFamily: 'var(--pl-font-mono)',
+                              color: 'rgba(8,8,8,0.5)',
+                              whiteSpace: 'nowrap',
+                              transform: index === 0 ? 'none' : 'translateX(-50%)',
+                            }}
                           >
                             {tick.timecode}
                           </div>
@@ -882,8 +919,10 @@ export function WaveformViewer() {
 
                 return (
                   <div
-                    className="relative h-7 bg-[hsla(0,0%,12%,0.4)] border-b border-white/5 pointer-events-none"
+                    className="relative h-7 pointer-events-none"
                     style={{
+                      background: '#E0E0E0',
+                      borderBottom: '1px solid rgba(8,8,8,0.15)',
                       width: zoom === 0 ? '100%' : `${displayW}px`,
                       minWidth: zoom === 0 ? '100%' : `${displayW}px`,
                     }}
@@ -907,7 +946,7 @@ export function WaveformViewer() {
                             className="absolute top-0 h-full flex items-center justify-center"
                             style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
                           >
-                            <span className="text-[11px] font-semibold text-foreground/50 select-none">
+                            <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'var(--pl-font-mono)', color: 'rgba(8,8,8,0.5)', userSelect: 'none' }}>
                               #{cueIndex + 1}
                             </span>
                           </div>
@@ -947,17 +986,89 @@ export function WaveformViewer() {
                 )
               })()}
 
+              {/* Active cue section overlays on waveform timeline */}
+              {isReady && hasLinkedSections && (() => {
+                const duration = wavesurferRef.current?.getDuration() || 1
+                let displayW = waveformWidth
+                if (!displayW || displayW === 0) {
+                  const wrapper = wavesurferRef.current?.getWrapper()
+                  if (zoom === 0) {
+                    const container = waveformRef.current?.parentElement
+                    displayW = container?.clientWidth || wrapper?.clientWidth || 0
+                  } else {
+                    displayW = wrapper?.scrollWidth || wrapper?.clientWidth || 0
+                  }
+                }
+
+                const cueDuration = Math.max(0.001, (activeCue?.end ?? 0) - (activeCue?.start ?? 0))
+                const playheadSectionIdx = activeSections.findIndex((sec) => {
+                  const secStart = (activeCue?.start ?? 0) + sec.start_relative
+                  const secEnd = (activeCue?.start ?? 0) + sec.end_relative
+                  return currentTime >= secStart && currentTime <= secEnd
+                })
+                const effectiveIdx = linkedSectionIndex ?? (playheadSectionIdx >= 0 ? playheadSectionIdx : null)
+
+                return (
+                  <div
+                    className="absolute left-0 top-[36px] h-[180px] pointer-events-none"
+                    style={{
+                      width: zoom === 0 ? '100%' : `${displayW}px`,
+                      minWidth: zoom === 0 ? '100%' : `${displayW}px`,
+                      zIndex: 4,
+                    }}
+                  >
+                    {activeSections.map((sec, idx) => {
+                      const secStart = (activeCue?.start ?? 0) + sec.start_relative
+                      const secEnd = (activeCue?.start ?? 0) + sec.end_relative
+                      const leftPx = (secStart / duration) * displayW
+                      const widthPx = Math.max(4, ((secEnd - secStart) / duration) * displayW)
+                      const isActiveSection = effectiveIdx === idx
+                      return (
+                        <div
+                          key={idx}
+                          className="absolute top-0 h-full pointer-events-auto"
+                          onMouseEnter={() => onLinkedSectionHover?.(idx)}
+                          onMouseLeave={() => onLinkedSectionHover?.(null)}
+                          onClick={() => onLinkedSectionSelect?.(idx)}
+                          title={`Section ${idx + 1}: ${sec.energy_label}${sec.bpm ? ` · ${Math.round(sec.bpm)} BPM` : ''}${sec.key ? ` · ${sec.key}` : ''}`}
+                          style={{
+                            left: `${leftPx}px`,
+                            width: `${widthPx}px`,
+                            background: getEnergyOverlayColor(sec.energy_label),
+                            borderLeft: '1px solid rgba(8,8,8,0.35)',
+                            borderRight: '1px solid rgba(8,8,8,0.35)',
+                            opacity: effectiveIdx !== null && !isActiveSection ? 0.4 : 1,
+                            boxShadow: isActiveSection ? 'inset 0 0 0 2px rgba(255,255,255,0.75)' : 'none',
+                            cursor: 'pointer',
+                            transition: 'opacity 0.12s ease, box-shadow 0.12s ease',
+                          }}
+                        />
+                      )
+                    })}
+                  </div>
+                )
+              })()}
+
               <div ref={waveformRef} className="w-full" />
 
               {/* Dragging timecode tooltips - bottom-right corner near mouse cursor */}
               {draggingTimecodes && draggingTimecodes.mouseX !== undefined && draggingTimecodes.mouseY !== undefined && (
                 <div
-                  className="fixed bg-primary text-primary-foreground rounded-lg shadow-xl px-3 py-2 pointer-events-none text-sm font-mono whitespace-nowrap"
                   style={{
+                    position: 'fixed',
                     left: `${draggingTimecodes.mouseX}px`,
                     top: `${draggingTimecodes.mouseY}px`,
                     transform: 'translate(calc(-100% - 12px), calc(-100% - 12px))',
-                    zIndex: 9999
+                    background: '#080808',
+                    color: '#F0F0F0',
+                    borderRadius: '4px',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                    padding: '6px 10px',
+                    pointerEvents: 'none' as const,
+                    fontSize: '0.8rem',
+                    fontFamily: 'var(--pl-font-mono)',
+                    whiteSpace: 'nowrap',
+                    zIndex: 9999,
                   }}
                 >
                   {draggingTimecodes.activeHandle === 'start' && draggingTimecodes.start}
@@ -969,75 +1080,65 @@ export function WaveformViewer() {
           </div>
 
           {isReady && (
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderTop: '1px solid #080808' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {/* Playhead timecode display */}
-                <div className="px-3 py-1.5 bg-white/10 border border-white/10 rounded text-sm font-mono text-foreground min-w-[120px] text-center">
+                <div style={{
+                  padding: '4px 10px',
+                  border: '1px solid #080808',
+                  borderRadius: 4,
+                  fontSize: '0.8rem',
+                  fontFamily: 'var(--pl-font-mono)',
+                  minWidth: 120,
+                  textAlign: 'center',
+                  background: '#fff',
+                }}>
                   {currentTimecode || secondsToTimecode(0, framerate, startTimecode)}
                 </div>
 
                 {/* Audio level meters - animated when playing */}
-                <div className="flex items-end gap-[2px] h-6 px-2">
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 20, padding: '0 6px' }}>
                   {[0, 1, 2, 3, 4].map((i) => (
                     <div
                       key={i}
-                      className="w-[3px] bg-primary rounded-sm"
                       style={{
+                        width: 3,
+                        background: '#080808',
+                        borderRadius: 1,
                         height: isPlaying ? undefined : '4px',
-                        // Use full animation shorthand to avoid React style conflict warning
                         animation: isPlaying ? `soundbar 0.4s ease-in-out ${i * 0.08}s infinite` : 'none',
                       }}
                     />
                   ))}
                 </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handlePlayPause}
-                  className="min-w-[70px]"
-                >
+                <button className="btn-pill" style={{ height: 28, fontSize: '0.65rem', minWidth: 60 }} onClick={handlePlayPause}>
                   {isPlaying ? 'Pause' : 'Play'}
-                </Button>
+                </button>
               </div>
 
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleZoomOut}
-                  disabled={zoom === ZOOM_LEVELS[0]}
-                >
-                  Zoom Out
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleZoomReset}
-                  disabled={zoom === 0}
-                >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <button className="btn-pill" style={{ height: 28, fontSize: '0.6rem' }} onClick={handleZoomOut} disabled={zoom === ZOOM_LEVELS[0]}>
+                  −
+                </button>
+                <button className="btn-pill" style={{ height: 28, fontSize: '0.6rem' }} onClick={handleZoomReset} disabled={zoom === 0}>
                   Fit
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleZoomIn}
-                  disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}
-                >
-                  Zoom In
-                </Button>
+                </button>
+                <button className="btn-pill" style={{ height: 28, fontSize: '0.6rem' }} onClick={handleZoomIn} disabled={zoom >= ZOOM_LEVELS[ZOOM_LEVELS.length - 1]}>
+                  +
+                </button>
               </div>
 
-              <div className="flex items-center gap-4 ml-auto">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto' }}>
                 {segments.length > 0 && !project && (
-                  <div className="text-xs text-muted-foreground">
-                    Drag edges to adjust • Drag empty area to add • Right-click to split/delete
-                  </div>
+                  <span style={{ fontSize: '0.6rem', fontFamily: 'var(--pl-font-mono)', opacity: 0.5 }}>
+                    Drag edges • Right-click split/delete
+                  </span>
                 )}
                 {project && (
-                  <div className="text-sm text-muted-foreground">
+                  <span style={{ fontSize: '0.6rem', fontFamily: 'var(--pl-font-mono)', opacity: 0.5 }}>
                     Click cues to view details
-                  </div>
+                  </span>
                 )}
               </div>
             </div>
@@ -1051,22 +1152,33 @@ export function WaveformViewer() {
                 onClick={() => setContextMenu(null)}
               />
               <div
-                className="fixed glass border border-white/10 rounded-lg shadow-2xl py-1 z-50"
                 style={{
+                  position: 'fixed',
                   left: `${contextMenu.x}px`,
                   top: `${contextMenu.y}px`,
+                  background: '#fff',
+                  border: '1px solid #080808',
+                  borderRadius: 6,
+                  boxShadow: '4px 4px 0 rgba(0,0,0,0.1)',
+                  padding: '4px 0',
+                  zIndex: 50,
+                  fontFamily: 'var(--pl-font-mono)',
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
-                  className="w-full px-4 py-2.5 text-left text-sm text-foreground hover:bg-white/10 flex items-center gap-3 transition-colors"
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 16px', border: 'none', background: 'none', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#F0F0F0')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
                   onClick={() => handleSplitAtMouse(contextMenu.segmentIndex, contextMenu.splitTime)}
                 >
-                  <span className="text-primary">✂</span>
+                  <span>✂</span>
                   <span>Split cue</span>
                 </button>
                 <button
-                  className="w-full px-4 py-2.5 text-left text-sm text-red-400 hover:bg-white/10 flex items-center gap-3 transition-colors"
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 16px', border: 'none', background: 'none', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left', color: '#c00' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#F0F0F0')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
                   onClick={() => handleDeleteCue(contextMenu.segmentIndex, contextMenu.x, contextMenu.y)}
                 >
                   <span>🗑</span>
@@ -1085,25 +1197,32 @@ export function WaveformViewer() {
                 onClick={() => setDeleteConfirm(null)}
               />
               <div
-                className="fixed glass border border-white/10 rounded-lg shadow-2xl p-4 z-50"
                 style={{
+                  position: 'fixed',
                   left: `${deleteConfirm.x}px`,
                   top: `${deleteConfirm.y}px`,
                   transform: 'translate(-50%, -100%)',
-                  marginTop: '-8px'
+                  marginTop: '-8px',
+                  background: '#fff',
+                  border: '1px solid #080808',
+                  borderRadius: 6,
+                  boxShadow: '4px 4px 0 rgba(0,0,0,0.1)',
+                  padding: 16,
+                  zIndex: 50,
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <p className="text-sm text-foreground mb-3">Delete this cue?</p>
-                <div className="flex gap-2">
-                  <button
-                    className="px-3 py-1.5 text-sm bg-white/10 hover:bg-white/20 text-foreground rounded transition-colors"
-                    onClick={() => setDeleteConfirm(null)}
-                  >
+                <p style={{ fontSize: '0.8rem', fontFamily: 'var(--pl-font-mono)', marginBottom: 12 }}>Delete this cue?</p>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button className="btn-pill" style={{ height: 28, fontSize: '0.65rem' }} onClick={() => setDeleteConfirm(null)}>
                     Cancel
                   </button>
                   <button
-                    className="px-3 py-1.5 text-sm bg-red-500/80 hover:bg-red-500 text-white rounded transition-colors"
+                    style={{
+                      height: 28, padding: '0 12px', border: '1px solid #c00', borderRadius: 100,
+                      background: '#c00', color: '#fff', fontSize: '0.65rem', fontWeight: 800,
+                      textTransform: 'uppercase', cursor: 'pointer',
+                    }}
                     onClick={() => {
                       deleteSegment(deleteConfirm.index)
                       setDeleteConfirm(null)
@@ -1116,8 +1235,7 @@ export function WaveformViewer() {
             </>,
             document.body
           )}
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

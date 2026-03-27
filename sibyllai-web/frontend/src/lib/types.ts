@@ -26,6 +26,7 @@ export interface AnalyzeCuesRequest {
   segments: [number, number][]
   fps?: number
   threshold?: number
+  mix_type?: 'clean_mx' | 'full_mix'
 }
 
 export interface AnalysisResponse {
@@ -95,6 +96,19 @@ export interface CueReplacement {
   window_size: number
 }
 
+export interface CueSection {
+  index: number
+  start: number
+  end: number
+  start_relative: number
+  end_relative: number
+  duration: number
+  energy_label: string
+  clap_energy: Record<string, number>
+  bpm: number | null
+  key: string | null
+}
+
 export interface MusicalProfile {
   detected: DetectedAttributes
   curated: CuratedAttributes
@@ -102,6 +116,7 @@ export interface MusicalProfile {
   key: string | null
   valence: number
   arousal: number
+  sections: CueSection[]
 }
 
 export interface DetectedAttributes {
@@ -152,6 +167,9 @@ export interface LibraryBuildRequest {
   include_moods?: boolean
   reset?: boolean
   db_path?: string
+  segmentation_mode?: 'fixed' | 'structure'
+  min_section_length?: number
+  sensitivity?: number
 }
 
 export interface LibraryBuildResponse {
@@ -200,6 +218,10 @@ export interface LibraryMatch {
   key?: string | null
   instruments?: string[]
   genres?: string[]
+  // Structure-aware segmentation fields
+  segment_type?: string
+  section_index?: number | null
+  total_sections?: number | null
 }
 
 export interface LibraryMatchResponse {
@@ -228,6 +250,7 @@ export interface LibraryInfo {
   tracks: number
   windows: number
   meta: Record<string, unknown>
+  segmentation_mode?: string
 }
 
 export interface LibrarySource {

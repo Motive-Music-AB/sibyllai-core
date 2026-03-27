@@ -42,6 +42,7 @@ def create_cue(
     valence: float,
     arousal: float,
     clap_categorized: dict[str, dict[str, float]],
+    sections: list[dict] | None = None,
 ) -> dict[str, Any]:
     """
     Create a cue data structure with musical_profile and project_context.
@@ -121,6 +122,7 @@ def create_cue(
             "key": key if key != "Unknown" else None,
             "valence": valence,
             "arousal": arousal,
+            "sections": sections or [],
         },
 
         "project_context": {

@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Energy-Waveform Link Mockup</title>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+        :root {
+            --bg: #0b0d12;
+            --panel: #121722;
+            --panel-2: #161d2a;
+            --line: rgba(255, 255, 255, 0.09);
+            --text: #edf2ff;
+            --muted: #98a3be;
+            --section-1: #63b7ff;
+            --section-2: #f2b84d;
+            --section-3: #f3596b;
+            --section-4: #60c6b1;
+            --active: #f8fbff;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: Manrope, sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at 15% 10%, #1a2233 0%, transparent 42%),
+                radial-gradient(circle at 82% 78%, #1b1426 0%, transparent 44%),
+                var(--bg);
+            padding: 28px;
+        }
+
+        .frame {
+            max-width: 1240px;
+            margin: 0 auto;
+            border: 1px solid var(--line);
+            background: linear-gradient(170deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+            border-radius: 18px;
+            padding: 24px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+        }
+
+        .head {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+            gap: 16px;
+            margin-bottom: 18px;
+        }
+        h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 800;
+            letter-spacing: -0.02em;
+        }
+        .sub {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 13px;
+        }
+        .toggle {
+            padding: 8px 12px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            background: rgba(99, 183, 255, 0.14);
+            color: #b6deff;
+            font-size: 12px;
+            font-family: "IBM Plex Mono", monospace;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 1fr 360px;
+            gap: 18px;
+        }
+
+        .main {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 14px;
+        }
+
+        .wavebox {
+            position: relative;
+            height: 210px;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--line);
+            background: #0a0f1a;
+        }
+        .wave-svg {
+            width: 100%;
+            height: 100%;
+            opacity: 0.95;
+        }
+
+        .sections {
+            position: absolute;
+            inset: 0;
+            display: flex;
+        }
+        .section {
+            position: relative;
+            height: 100%;
+            border-right: 1px solid rgba(255, 255, 255, 0.14);
+            cursor: pointer;
+            transition: opacity 140ms ease, outline-color 140ms ease;
+            outline: 2px solid transparent;
+            outline-offset: -2px;
+        }
+        .section:hover { opacity: 1 !important; }
+        .section .label {
+            position: absolute;
+            left: 8px;
+            top: 8px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            background: rgba(0, 0, 0, 0.38);
+            border: 1px solid rgba(255, 255, 255, 0.18);
+        }
+        .section .meta {
+            position: absolute;
+            left: 8px;
+            bottom: 8px;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 11px;
+            color: #edf2ff;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+        }
+
+        .playhead {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: white;
+            left: 56.25%;
+            z-index: 7;
+            box-shadow: 0 0 16px rgba(255, 255, 255, 0.6);
+        }
+
+        .ticks {
+            margin-top: 8px;
+            display: flex;
+            justify-content: space-between;
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 11px;
+            color: #76829d;
+        }
+
+        .pills {
+            margin-top: 10px;
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+        }
+        .pill {
+            border-radius: 10px;
+            border: 1px solid var(--line);
+            padding: 8px 10px;
+            font-size: 12px;
+            cursor: pointer;
+            color: #f3f7ff;
+            background: rgba(255, 255, 255, 0.03);
+            transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease;
+        }
+        .pill:hover {
+            transform: translateY(-1px);
+            border-color: rgba(255, 255, 255, 0.22);
+        }
+        .pill strong {
+            font-family: "IBM Plex Mono", monospace;
+            font-size: 11px;
+            opacity: 0.95;
+        }
+
+        .side {
+            background: var(--panel-2);
+            border: 1px solid var(--line);
+            border-radius: 16px;
+            padding: 14px;
+        }
+        .detail-title {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 800;
+        }
+        .detail-sub {
+            margin: 4px 0 12px;
+            color: var(--muted);
+            font-size: 12px;
+            font-family: "IBM Plex Mono", monospace;
+        }
+        .row {
+            display: flex;
+            justify-content: space-between;
+            margin: 8px 0;
+            font-size: 13px;
+        }
+        .bars {
+            margin-top: 12px;
+            display: grid;
+            gap: 8px;
+        }
+        .bar-line { font-size: 12px; color: #d9e4ff; }
+        .track {
+            margin-top: 3px;
+            height: 8px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            overflow: hidden;
+        }
+        .fill {
+            height: 100%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #7fc2ff 0%, #f3596b 100%);
+        }
+
+        .annotation {
+            margin-top: 14px;
+            border-top: 1px dashed rgba(255, 255, 255, 0.2);
+            padding-top: 10px;
+            color: #a9b6d3;
+            font-size: 12px;
+        }
+
+        .active {
+            opacity: 1 !important;
+            outline-color: rgba(248, 251, 255, 0.7);
+            z-index: 3;
+        }
+        .dimmed { opacity: 0.33; }
+        .pill-active {
+            border-color: rgba(248, 251, 255, 0.45);
+            box-shadow: 0 0 0 1px rgba(248, 251, 255, 0.24) inset;
+        }
+    </style>
+</head>
+<body>
+    <div class="frame">
+        <div class="head">
+            <div>
+                <h1>Cue Structure & Energy</h1>
+                <p class="sub">Waveform-linked section energy overview</p>
+            </div>
+            <div class="toggle">Energy Overlay: ON</div>
+        </div>
+
+        <div class="layout">
+            <section class="main">
+                <div class="wavebox" id="wavebox">
+                    <svg class="wave-svg" viewBox="0 0 1200 210" preserveAspectRatio="none">
+                        <path d="M0,105 C40,30 80,180 120,105 C160,20 200,190 240,105 C280,40 320,170 360,105 C400,55 440,155 480,105 C520,25 560,185 600,105 C640,45 680,165 720,105 C760,30 800,180 840,105 C880,50 920,160 960,105 C1000,25 1040,185 1080,105 C1120,45 1160,165 1200,105"
+                              fill="none" stroke="rgba(233,241,255,0.60)" stroke-width="1.5"/>
+                        <path d="M0,105 C60,78 120,132 180,102 C240,82 300,128 360,102 C420,84 480,125 540,102 C600,82 660,126 720,102 C780,84 840,124 900,102 C960,84 1020,126 1080,102 C1140,84 1200,126 1260,102"
+                              fill="none" stroke="rgba(233,241,255,0.35)" stroke-width="24"/>
+                    </svg>
+
+                    <div class="sections">
+                        <div class="section" data-id="0" style="width:25%; background: rgba(99,183,255,0.30);">
+                            <div class="label">#1 Gentle</div><div class="meta">98 BPM · C</div>
+                        </div>
+                        <div class="section" data-id="1" style="width:25%; background: rgba(242,184,77,0.30);">
+                            <div class="label">#2 Build</div><div class="meta">108 BPM · Dm</div>
+                        </div>
+                        <div class="section" data-id="2" style="width:25%; background: rgba(243,89,107,0.34);">
+                            <div class="label">#3 Climactic</div><div class="meta">122 BPM · Em</div>
+                        </div>
+                        <div class="section" data-id="3" style="width:25%; background: rgba(96,198,177,0.30);">
+                            <div class="label">#4 Release</div><div class="meta">95 BPM · G</div>
+                        </div>
+                    </div>
+                    <div class="playhead"></div>
+                </div>
+
+                <div class="ticks"><span>0:00</span><span>0:08</span><span>0:16</span><span>0:24</span><span>0:32</span></div>
+
+                <div class="pills">
+                    <button class="pill" data-id="0"><strong>#1</strong> 98 BPM C</button>
+                    <button class="pill" data-id="1"><strong>#2</strong> 108 BPM Dm</button>
+                    <button class="pill" data-id="2"><strong>#3</strong> 122 BPM Em</button>
+                    <button class="pill" data-id="3"><strong>#4</strong> 95 BPM G</button>
+                </div>
+            </section>
+
+            <aside class="side">
+                <h2 class="detail-title" id="d-title">Section #3 — Climactic</h2>
+                <p class="detail-sub" id="d-time">0:16 - 0:24 · 8.0s</p>
+                <div class="row"><span>BPM</span><strong id="d-bpm">122</strong></div>
+                <div class="row"><span>Key</span><strong id="d-key">Em</strong></div>
+
+                <div class="bars" id="bars"></div>
+                <p class="annotation">Hover any section band or pill to sync highlights with the waveform. Click to pin selection.</p>
+            </aside>
+        </div>
+    </div>
+
+    <script>
+        const sectionData = [
+            {
+                title: "Section #1 - Gentle",
+                time: "0:00 - 0:08 · 8.0s",
+                bpm: "98",
+                key: "C",
+                energy: [
+                    ["gentle", 0.81], ["low energy", 0.74], ["building tension", 0.22],
+                    ["high energy", 0.20], ["aggressive", 0.08], ["climactic", 0.06]
+                ]
+            },
+            {
+                title: "Section #2 - Building Tension",
+                time: "0:08 - 0:16 · 8.0s",
+                bpm: "108",
+                key: "Dm",
+                energy: [
+                    ["building tension", 0.79], ["high energy", 0.54], ["climactic", 0.39],
+                    ["aggressive", 0.31], ["low energy", 0.18], ["gentle", 0.15]
+                ]
+            },
+            {
+                title: "Section #3 - Climactic",
+                time: "0:16 - 0:24 · 8.0s",
+                bpm: "122",
+                key: "Em",
+                energy: [
+                    ["climactic", 0.82], ["aggressive", 0.71], ["high energy", 0.66],
+                    ["building tension", 0.55], ["low energy", 0.18], ["gentle", 0.10]
+                ]
+            },
+            {
+                title: "Section #4 - Release",
+                time: "0:24 - 0:32 · 8.0s",
+                bpm: "95",
+                key: "G",
+                energy: [
+                    ["low energy", 0.76], ["gentle", 0.68], ["building tension", 0.19],
+                    ["high energy", 0.18], ["climactic", 0.14], ["aggressive", 0.10]
+                ]
+            },
+        ];
+
+        const sections = [...document.querySelectorAll(".section")];
+        const pills = [...document.querySelectorAll(".pill")];
+        let selected = 2;
+
+        function renderDetail(id) {
+            const d = sectionData[id];
+            document.getElementById("d-title").textContent = d.title;
+            document.getElementById("d-time").textContent = d.time;
+            document.getElementById("d-bpm").textContent = d.bpm;
+            document.getElementById("d-key").textContent = d.key;
+
+            const bars = document.getElementById("bars");
+            bars.innerHTML = d.energy.map(([name, val], idx) => `
+                <div class="bar-line"><strong>${idx === 0 ? name : name}</strong> ${val.toFixed(2)}
+                    <div class="track"><div class="fill" style="width:${Math.round(val * 100)}%"></div></div>
+                </div>
+            `).join("");
+        }
+
+        function setActive(id, temporary = false) {
+            sections.forEach((el, i) => {
+                el.classList.remove("active", "dimmed");
+                if (i !== id) el.classList.add("dimmed");
+            });
+            pills.forEach((el, i) => {
+                el.classList.remove("pill-active");
+                if (i === id) el.classList.add("pill-active");
+            });
+            sections[id].classList.add("active");
+            renderDetail(id);
+            if (!temporary) selected = id;
+        }
+
+        function clearHover() {
+            setActive(selected, true);
+        }
+
+        sections.forEach((el, idx) => {
+            el.addEventListener("mouseenter", () => setActive(idx, true));
+            el.addEventListener("mouseleave", clearHover);
+            el.addEventListener("click", () => setActive(idx));
+        });
+
+        pills.forEach((el, idx) => {
+            el.addEventListener("mouseenter", () => setActive(idx, true));
+            el.addEventListener("mouseleave", clearHover);
+            el.addEventListener("click", () => setActive(idx));
+        });
+
+        setActive(selected);
+    </script>
+</body>
+</html>

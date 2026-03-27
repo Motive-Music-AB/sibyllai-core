@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 import { api } from '@/lib/api'
 import { AddItemCombobox } from './AddItemCombobox'
@@ -12,7 +10,16 @@ import {
   GENRE_THRESHOLD,
   STYLE_THRESHOLD,
 } from '@/lib/constants'
-import type { Cue, CuratedAttributes } from '@/lib/types'
+import type { Cue, CuratedAttributes, CueSection } from '@/lib/types'
+
+/** Map energy label to greyscale shade (brutalist palette). */
+function energyToGrey(label: string): string {
+  const l = label.toLowerCase()
+  if (l.includes('high') || l.includes('climactic') || l.includes('intense')) return '#2a2a2a'
+  if (l.includes('building') || l.includes('moderate') || l.includes('medium')) return '#707070'
+  if (l.includes('low') || l.includes('gentle') || l.includes('calm') || l.includes('soft')) return '#c0c0c0'
+  return '#909090' // default mid-grey for unknown
+}
 
 interface CueCardProps {
   cue: Cue
@@ -20,7 +27,6 @@ interface CueCardProps {
 }
 
 // Get items to display: detected items above threshold + curated items (even if below threshold)
-// This ensures users can deselect items that were auto-curated but are below display threshold
 function getDisplayItems(
   detected: Record<string, number> | undefined,
   curated: string[] | undefined,
@@ -29,16 +35,14 @@ function getDisplayItems(
   const detectedMap = detected || {}
   const curatedSet = new Set(curated || [])
 
-  // Start with detected items above threshold
   const items = Object.entries(detectedMap)
     .filter(([name, score]) => score >= threshold || curatedSet.has(name))
     .sort((a, b) => b[1] - a[1])
 
-  // Add any curated items not in detected (manually added)
   const detectedNames = new Set(items.map(([name]) => name))
   for (const name of curatedSet) {
     if (!detectedNames.has(name)) {
-      items.push([name, 0]) // Score 0 for manually added items
+      items.push([name, 0])
     }
   }
 
@@ -69,15 +73,12 @@ export function CueCard({ cue, index }: CueCardProps) {
 
   const handleClick = () => {
     if (isActive) {
-      // Second click on active cue - toggle expand
       setIsExpanded(!isExpanded)
     } else {
-      // First click - just select
       setActiveCueId(cue.id)
     }
   }
 
-  // Toggle item in/out of curated list
   const toggleItem = (category: keyof CuratedAttributes, item: string) => {
     setLocalCurated((prev) => {
       const current = (prev[category] as string[]) || []
@@ -88,7 +89,6 @@ export function CueCard({ cue, index }: CueCardProps) {
     })
   }
 
-  // Add item to curated list
   const addItem = (category: keyof CuratedAttributes, item: string) => {
     setLocalCurated((prev) => {
       const current = (prev[category] as string[]) || []
@@ -97,7 +97,6 @@ export function CueCard({ cue, index }: CueCardProps) {
     })
   }
 
-  // Save changes to backend
   const handleSave = async () => {
     if (!sessionId) return
     setIsSaving(true)
@@ -117,14 +116,11 @@ export function CueCard({ cue, index }: CueCardProps) {
     }
   }
 
-  // Cancel and reset
   const handleCancel = () => {
     setLocalCurated(cue.musical_profile.curated)
     setIsExpanded(false)
   }
 
-  // Get items to display for each category
-  // Includes detected items above threshold + curated items (so they can be deselected)
   const detectedInstruments = getDisplayItems(
     cue.musical_profile.detected?.instruments_yamnet,
     localCurated.instruments,
@@ -141,110 +137,138 @@ export function CueCard({ cue, index }: CueCardProps) {
     STYLE_THRESHOLD
   )
 
-  // Title case helper
   const toTitleCase = (str: string) => str.replace(/\b\w/g, char => char.toUpperCase())
 
-  // Limit items for display (with title case)
   const displayInstruments = (localCurated.instruments?.slice(0, 6) || []).map(toTitleCase)
   const displayGenres = (localCurated.genres?.slice(0, 2) || localCurated.genre?.slice(0, 2) || []).map(toTitleCase)
   const displayStyles = (localCurated.style?.slice(0, 2) || []).map(toTitleCase)
   const cueStatus = cue.project_context?.status
   const isMatched = cueStatus === 'matched'
 
+  const sections: CueSection[] = cue.musical_profile.sections || []
+  const hasSections = sections.length > 1
+
   return (
-    <Card
+    <div
       ref={cardRef}
       onClick={handleClick}
-      className="p-4 cursor-pointer transition-all glass"
+      className="track-card"
       style={isActive ? {
-        border: '2px solid rgba(232, 148, 58, 0.7)',
-        boxShadow: '0 0 12px rgba(232, 148, 58, 0.3)',
-      } : undefined}
+        border: '2px solid #080808',
+        background: '#fff',
+      } : {
+        cursor: 'pointer',
+      }}
     >
       {/* Header row */}
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-lg font-medium font-display shrink-0">Cue {index + 1}</span>
-          <span className="text-sm text-foreground-muted font-mono shrink-0">{cue.start_tc} - {cue.end_tc}</span>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{ fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase' }}>Cue {index + 1}</span>
+          <span className="mono" style={{ fontSize: '0.7rem', opacity: 0.6 }}>{cue.start_tc} - {cue.end_tc}</span>
           {isMatched && (
-            <span className="text-xs uppercase tracking-wide px-2 py-0.5 rounded-full bg-primary/20 text-primary shrink-0">
-              Matched
-            </span>
+            <span className="tag" style={{ background: '#080808', color: '#F0F0F0' }}>MATCHED</span>
           )}
           {isPlaying && (
-            <span className="flex items-center gap-0.5 ml-2 shrink-0">
-              <span className="w-1 h-3 bg-primary rounded-full animate-[soundbar_0.5s_ease-in-out_infinite_alternate]" style={{ animationDelay: '0ms' }} />
-              <span className="w-1 h-3 bg-primary rounded-full animate-[soundbar_0.5s_ease-in-out_infinite_alternate]" style={{ animationDelay: '150ms' }} />
-              <span className="w-1 h-3 bg-primary rounded-full animate-[soundbar_0.5s_ease-in-out_infinite_alternate]" style={{ animationDelay: '300ms' }} />
+            <span style={{ display: 'flex', alignItems: 'center', gap: 1, marginLeft: 4 }}>
+              <span style={{ width: 2, height: 10, background: '#080808', borderRadius: 1, animation: 'soundbar 0.5s ease-in-out infinite alternate', animationDelay: '0ms' }} />
+              <span style={{ width: 2, height: 10, background: '#080808', borderRadius: 1, animation: 'soundbar 0.5s ease-in-out infinite alternate', animationDelay: '150ms' }} />
+              <span style={{ width: 2, height: 10, background: '#080808', borderRadius: 1, animation: 'soundbar 0.5s ease-in-out infinite alternate', animationDelay: '300ms' }} />
             </span>
-          )}
-        </div>
-        <div className="flex items-center gap-3 text-xs shrink-0">
-          {isActive && !isExpanded && (
-            <span className="text-primary font-medium">SPACE to play</span>
           )}
         </div>
       </div>
 
       {/* Compact info grid */}
-      <div className="space-y-2 text-sm">
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-          <div className="flex items-center gap-2">
-            <span className="text-foreground-muted text-xs uppercase tracking-wide">BPM</span>
-            <span className="font-medium">
+      <div style={{ fontSize: '0.75rem' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span className="label" style={{ fontSize: '0.6rem' }}>BPM</span>
+            <span className="mono">
               {typeof cue.musical_profile.bpm === 'number'
                 ? Math.round(cue.musical_profile.bpm)
                 : cue.musical_profile.bpm || '—'}
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-foreground-muted text-xs uppercase tracking-wide">Key</span>
-            <span className="font-medium">{cue.musical_profile.key || '—'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <span className="label" style={{ fontSize: '0.6rem' }}>Key</span>
+            <span className="mono">{cue.musical_profile.key || '—'}</span>
           </div>
           {displayGenres.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-foreground-muted text-xs uppercase tracking-wide">Genre</span>
-              <span className="font-medium">{displayGenres.join(', ')}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span className="label" style={{ fontSize: '0.6rem' }}>Genre</span>
+              <span className="mono">{displayGenres.join(', ')}</span>
             </div>
           )}
           {displayStyles.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-foreground-muted text-xs uppercase tracking-wide">Style</span>
-              <span className="font-medium">{displayStyles.join(', ')}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span className="label" style={{ fontSize: '0.6rem' }}>Style</span>
+              <span className="mono">{displayStyles.join(', ')}</span>
             </div>
           )}
         </div>
         {displayInstruments.length > 0 && (
-          <div className="flex items-start gap-2">
-            <span className="text-foreground-muted text-xs uppercase tracking-wide shrink-0 mt-0.5">Instruments</span>
-            <span className="font-medium">{displayInstruments.join(', ')}</span>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4, marginTop: 4 }}>
+            <span className="label" style={{ fontSize: '0.6rem', flexShrink: 0, marginTop: 1 }}>Inst</span>
+            <span className="mono">{displayInstruments.join(', ')}</span>
           </div>
         )}
       </div>
 
+      {/* Section structure bar */}
+      {hasSections && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+            <span className="label" style={{ fontSize: '0.55rem' }}>STRUCTURE</span>
+            <span className="mono" style={{ fontSize: '0.55rem', opacity: 0.4 }}>{sections.length} sections</span>
+          </div>
+          <div style={{ display: 'flex', height: 14, borderRadius: 3, overflow: 'hidden', border: '1px solid rgba(8,8,8,0.15)' }}>
+            {sections.map((sec) => {
+              const totalDuration = cue.end - cue.start
+              const widthPercent = totalDuration > 0 ? (sec.duration / totalDuration) * 100 : 0
+              const bg = energyToGrey(sec.energy_label)
+              return (
+                <div
+                  key={sec.index}
+                  title={`${sec.energy_label} · ${sec.duration.toFixed(1)}s${sec.bpm ? ` · ${Math.round(sec.bpm)} BPM` : ''}${sec.key ? ` · ${sec.key}` : ''}`}
+                  style={{
+                    width: `${widthPercent}%`,
+                    minWidth: 2,
+                    background: bg,
+                    borderRight: sec.index < sections.length - 1 ? '1px solid rgba(255,255,255,0.4)' : 'none',
+                    cursor: 'default',
+                  }}
+                />
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Expanded edit section */}
       {isExpanded && (
         <div
-          className="mt-4 p-4 glass rounded-xl space-y-6"
+          style={{
+            marginTop: 12,
+            padding: 12,
+            border: '1px solid #080808',
+            borderRadius: 8,
+            background: '#F8F8F8',
+          }}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Instruments section */}
-          <div>
-            <div className="text-xs font-bold uppercase tracking-widest text-foreground-muted mb-2">
+          <div style={{ marginBottom: 16 }}>
+            <div className="label" style={{ fontSize: '0.6rem', marginBottom: 6 }}>
               Instruments
             </div>
-            <div className="flex flex-wrap gap-2 mb-3">
+            <div className="tag-toggle-list">
               {detectedInstruments.map(([name, score]) => {
                 const isSelected = localCurated.instruments?.includes(name)
                 return (
                   <button
                     key={name}
                     onClick={() => toggleItem('instruments', name)}
-                    className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${
-                      isSelected
-                        ? 'bg-primary/20 border-primary text-foreground'
-                        : 'bg-white/5 border-white/10 text-foreground-muted hover:bg-white/10 hover:border-white/20'
-                    }`}
+                    className={`tag-toggle ${isSelected ? 'selected' : ''}`}
                   >
                     {name} ({score.toFixed(3)})
                   </button>
@@ -260,22 +284,18 @@ export function CueCard({ cue, index }: CueCardProps) {
           </div>
 
           {/* Genres section */}
-          <div>
-            <div className="text-xs font-bold uppercase tracking-widest text-foreground-muted mb-2">
+          <div style={{ marginBottom: 16 }}>
+            <div className="label" style={{ fontSize: '0.6rem', marginBottom: 6 }}>
               Genres
             </div>
-            <div className="flex flex-wrap gap-2 mb-3">
+            <div className="tag-toggle-list">
               {detectedGenres.map(([name, score]) => {
                 const isSelected = localCurated.genres?.includes(name)
                 return (
                   <button
                     key={name}
                     onClick={() => toggleItem('genres', name)}
-                    className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${
-                      isSelected
-                        ? 'bg-primary/20 border-primary text-foreground'
-                        : 'bg-white/5 border-white/10 text-foreground-muted hover:bg-white/10 hover:border-white/20'
-                    }`}
+                    className={`tag-toggle ${isSelected ? 'selected' : ''}`}
                   >
                     {name} ({score.toFixed(3)})
                   </button>
@@ -291,22 +311,18 @@ export function CueCard({ cue, index }: CueCardProps) {
           </div>
 
           {/* Style section */}
-          <div>
-            <div className="text-xs font-bold uppercase tracking-widest text-foreground-muted mb-2">
+          <div style={{ marginBottom: 16 }}>
+            <div className="label" style={{ fontSize: '0.6rem', marginBottom: 6 }}>
               Style
             </div>
-            <div className="flex flex-wrap gap-2 mb-3">
+            <div className="tag-toggle-list">
               {detectedStyles.map(([name, score]) => {
                 const isSelected = localCurated.style?.includes(name)
                 return (
                   <button
                     key={name}
                     onClick={() => toggleItem('style', name)}
-                    className={`px-3 py-1.5 text-xs rounded-lg border transition-all ${
-                      isSelected
-                        ? 'bg-primary/20 border-primary text-foreground'
-                        : 'bg-white/5 border-white/10 text-foreground-muted hover:bg-white/10 hover:border-white/20'
-                    }`}
+                    className={`tag-toggle ${isSelected ? 'selected' : ''}`}
                   >
                     {name} ({score.toFixed(3)})
                   </button>
@@ -322,27 +338,16 @@ export function CueCard({ cue, index }: CueCardProps) {
           </div>
 
           {/* Action buttons */}
-          <div className="flex justify-end gap-3 pt-4">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleCancel}
-              disabled={isSaving}
-              className="glass-lighter"
-            >
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, paddingTop: 8, borderTop: '1px solid rgba(8,8,8,0.1)' }}>
+            <button className="btn-pill" style={{ height: 28, fontSize: '0.65rem' }} onClick={handleCancel} disabled={isSaving}>
               Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleSave}
-              disabled={isSaving}
-              className="btn-primary"
-            >
+            </button>
+            <button className="btn-pill primary" style={{ height: 28, fontSize: '0.65rem' }} onClick={handleSave} disabled={isSaving}>
               {isSaving ? 'Saving...' : 'Save'}
-            </Button>
+            </button>
           </div>
         </div>
       )}
-    </Card>
+    </div>
   )
 }

@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/lib/store'
 import type { Cue } from '@/lib/types'
 
@@ -41,6 +40,20 @@ function formatCurrency(amount: number): string {
   return `$${amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 }
 
+const selectStyle: React.CSSProperties = {
+  width: '100%',
+  height: 36,
+  padding: '0 10px',
+  border: '1px solid #080808',
+  borderRadius: 6,
+  background: '#fff',
+  fontFamily: 'var(--pl-font-mono)',
+  fontSize: '0.75rem',
+  color: '#080808',
+  cursor: 'pointer',
+  appearance: 'auto' as const,
+}
+
 export function LicensingPage() {
   const { project, fileName, setCurrentPage, reset } = useAppStore()
 
@@ -70,78 +83,69 @@ export function LicensingPage() {
     alert(`Download All placeholder: ${matchedCues.length} tracks\n\nDownload API not yet implemented.`)
   }
 
-  const selectClass =
-    'bg-[hsla(0,0%,18%,0.6)] border border-[hsl(0_0%_100%/0.1)] rounded-lg px-3 py-2 text-sm text-foreground appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary/50 w-full'
-
   return (
-    <div className="space-y-4">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Header */}
-      <div className="glass px-6 py-4 rounded-2xl space-y-3">
-        <div className="flex items-center justify-between">
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage('replacement')} className="glass-lighter border-primary/20">
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button className="btn-pill" onClick={() => setCurrentPage('replacement')} style={{ height: 28, fontSize: '0.65rem' }}>
             ← Back
-          </Button>
-          <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
+          </button>
+          <button className="btn-pill" onClick={reset} style={{ height: 28, fontSize: '0.65rem' }}>
             New Import
-          </Button>
+          </button>
         </div>
         <div>
-          <h2 className="text-2xl font-medium font-display">Licensing & Download</h2>
-          <p className="text-sm text-foreground-muted">
+          <span style={{ fontSize: '1.2rem', fontWeight: 900, textTransform: 'uppercase' }}>Licensing & Download</span>
+          <p className="mono" style={{ fontSize: '0.7rem', opacity: 0.5, marginTop: 4 }}>
             {fileName ?? 'Project'} · {matchedCues.length} matched {matchedCues.length === 1 ? 'track' : 'tracks'}
           </p>
         </div>
       </div>
 
       {/* Rights Configuration */}
-      <div className="glass px-6 py-5 rounded-2xl space-y-3">
-        <h3 className="text-lg font-medium font-display">Rights Configuration</h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div style={{ padding: 16, border: '1px solid #080808', borderRadius: 8 }}>
+        <div className="label" style={{ marginBottom: 12 }}>Rights Configuration</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
           <div>
-            <label className="block text-xs text-foreground-muted uppercase tracking-wide mb-1.5">
+            <label className="label" style={{ display: 'block', fontSize: '0.55rem', marginBottom: 6, opacity: 0.6 }}>
               Territory
             </label>
             <select
               value={territory}
               onChange={(e) => setTerritory(e.target.value as Territory)}
-              className={selectClass}
+              style={selectStyle}
             >
               {TERRITORY_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-xs text-foreground-muted uppercase tracking-wide mb-1.5">
+            <label className="label" style={{ display: 'block', fontSize: '0.55rem', marginBottom: 6, opacity: 0.6 }}>
               Time Period
             </label>
             <select
               value={period}
               onChange={(e) => setPeriod(e.target.value as TimePeriod)}
-              className={selectClass}
+              style={selectStyle}
             >
               {PERIOD_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-xs text-foreground-muted uppercase tracking-wide mb-1.5">
+            <label className="label" style={{ display: 'block', fontSize: '0.55rem', marginBottom: 6, opacity: 0.6 }}>
               Medium
             </label>
             <select
               value={medium}
               onChange={(e) => setMedium(e.target.value as Medium)}
-              className={selectClass}
+              style={selectStyle}
             >
               {MEDIUM_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
           </div>
@@ -149,54 +153,64 @@ export function LicensingPage() {
       </div>
 
       {/* Track Table */}
-      <div className="glass px-6 py-5 rounded-2xl space-y-4">
-        <h3 className="text-lg font-medium font-display">Tracks</h3>
+      <div style={{ padding: 16, border: '1px solid #080808', borderRadius: 8 }}>
+        <div className="label" style={{ marginBottom: 12 }}>Tracks</div>
 
         {matchedCues.length === 0 ? (
-          <p className="text-sm text-foreground-muted">No matched tracks to display.</p>
+          <p className="mono" style={{ fontSize: '0.7rem', opacity: 0.5 }}>No matched tracks to display.</p>
         ) : (
           <>
             {/* Column headers */}
-            <div className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 items-center text-xs text-foreground-muted uppercase tracking-wide px-3 pb-1 border-b border-[hsl(0_0%_100%/0.06)]">
-              <span>Cue</span>
-              <span>Replacement Track</span>
-              <span className="text-right">Match</span>
-              <span className="text-right">License Fee</span>
-              <span className="text-right">Download</span>
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'auto 1fr auto auto auto',
+              gap: 16,
+              alignItems: 'center',
+              padding: '0 8px 8px',
+              borderBottom: '1px solid rgba(8,8,8,0.1)',
+            }}>
+              <span className="label" style={{ fontSize: '0.5rem' }}>Cue</span>
+              <span className="label" style={{ fontSize: '0.5rem' }}>Replacement Track</span>
+              <span className="label" style={{ fontSize: '0.5rem', textAlign: 'right' }}>Match</span>
+              <span className="label" style={{ fontSize: '0.5rem', textAlign: 'right' }}>License Fee</span>
+              <span className="label" style={{ fontSize: '0.5rem', textAlign: 'right' }}>Download</span>
             </div>
 
             {/* Track rows */}
-            <div className="space-y-2">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 8 }}>
               {matchedCues.map((cue) => {
                 const cueIndex = project!.cues.findIndex((c) => c.id === cue.id)
                 const score = cue.project_context?.replacement?.score ?? 0
                 return (
                   <div
                     key={cue.id}
-                    className="grid grid-cols-[auto_1fr_auto_auto_auto] gap-4 items-center px-3 py-3 rounded-lg border border-[hsl(0_0%_100%/0.06)] hover:border-primary/20 transition-colors"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'auto 1fr auto auto auto',
+                      gap: 16,
+                      alignItems: 'center',
+                      padding: '8px',
+                      borderRadius: 4,
+                      border: '1px solid rgba(8,8,8,0.1)',
+                    }}
                   >
-                    <div className="text-sm">
-                      <span className="font-medium">Cue {cueIndex + 1}</span>
-                      <div className="text-xs text-foreground-muted">{cue.start_tc} – {cue.end_tc}</div>
+                    <div>
+                      <span className="mono" style={{ fontSize: '0.75rem', fontWeight: 700 }}>Cue {cueIndex + 1}</span>
+                      <div className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>{cue.start_tc} – {cue.end_tc}</div>
                     </div>
-                    <div className="text-sm truncate" title={trackFileName(cue)}>
+                    <div className="mono" style={{ fontSize: '0.7rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={trackFileName(cue)}>
                       {trackFileName(cue)}
                     </div>
-                    <div className="text-sm text-right tabular-nums">
+                    <div className="mono" style={{ fontSize: '0.7rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                       {(score * 100).toFixed(1)}%
                     </div>
-                    <div className="text-sm text-right font-medium tabular-nums">
+                    <div className="mono" style={{ fontSize: '0.7rem', textAlign: 'right', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                       {formatCurrency(feePerTrack)}
                     </div>
-                    <div className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="glass-lighter border-primary/20 text-xs"
-                        onClick={() => handleDownload(cue)}
-                      >
+                    <div style={{ textAlign: 'right' }}>
+                      <button className="btn-pill" style={{ height: 24, fontSize: '0.55rem' }} onClick={() => handleDownload(cue)}>
                         Download
-                      </Button>
+                      </button>
                     </div>
                   </div>
                 )
@@ -204,20 +218,24 @@ export function LicensingPage() {
             </div>
 
             {/* Summary row */}
-            <div className="flex items-center justify-between pt-4 border-t border-[hsl(0_0%_100%/0.08)]">
-              <div className="text-sm text-foreground-muted">
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingTop: 12,
+              marginTop: 12,
+              borderTop: '1px solid rgba(8,8,8,0.1)',
+            }}>
+              <span className="mono" style={{ fontSize: '0.65rem', opacity: 0.5 }}>
                 {matchedCues.length} {matchedCues.length === 1 ? 'track' : 'tracks'} · {TERRITORY_OPTIONS.find((o) => o.value === territory)!.label} · {PERIOD_OPTIONS.find((o) => o.value === period)!.label} · {MEDIUM_OPTIONS.find((o) => o.value === medium)!.label}
-              </div>
-              <div className="flex items-center gap-4">
-                <span className="text-lg font-medium tabular-nums">
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span className="mono" style={{ fontSize: '1rem', fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
                   Total: {formatCurrency(totalFee)}
                 </span>
-                <Button
-                  className="btn-primary px-6"
-                  onClick={handleDownloadAll}
-                >
+                <button className="btn-pill primary" onClick={handleDownloadAll} style={{ height: 36 }}>
                   Download All
-                </Button>
+                </button>
               </div>
             </div>
           </>

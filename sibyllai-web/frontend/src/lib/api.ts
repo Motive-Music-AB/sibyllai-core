@@ -113,7 +113,10 @@ export const api = {
   async buildLibraryIndexUpload(
     files: File[],
     includeMoods: boolean,
-    reset: boolean
+    reset: boolean,
+    segmentationMode: 'fixed' | 'structure' = 'fixed',
+    minSectionLength: number = 8.0,
+    sensitivity: number = 1.0,
   ): Promise<LibraryBuildResponse> {
     const formData = new FormData()
     for (const file of files) {
@@ -124,6 +127,9 @@ export const api = {
     formData.append('include_moods', includeMoods ? 'true' : 'false')
     formData.append('reset', reset ? 'true' : 'false')
     formData.append('dedupe_simple', 'true')
+    formData.append('segmentation_mode', segmentationMode)
+    formData.append('min_section_length', String(minSectionLength))
+    formData.append('sensitivity', String(sensitivity))
 
     const response = await axios.post<LibraryBuildResponse>(`${API_BASE}/library/build-upload`, formData)
     return response.data

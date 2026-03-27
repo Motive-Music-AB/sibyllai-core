@@ -12,6 +12,7 @@ export function AnalyzeButton() {
     analysisProgress,
     analysisStatus,
     framerate,
+    mixType,
     setIsAnalyzing,
     setAnalysisProgress,
     setProject,
@@ -41,6 +42,7 @@ export function AnalyzeButton() {
         segments: selectedSegments,
         fps: framerate,
         threshold: 0.5,
+        mix_type: mixType,
       })
 
       const sessionId = response.session_id

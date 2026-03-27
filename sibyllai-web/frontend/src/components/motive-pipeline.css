@@ -204,6 +204,34 @@
   font-size: 0.85rem;
 }
 
+.pipeline-root .btn-play-card {
+  width: 24px;
+  height: 24px;
+  border: var(--pl-border);
+  flex-shrink: 0;
+}
+
+.pipeline-root .btn-play-card svg {
+  width: 10px;
+  height: 10px;
+}
+
+.pipeline-root .track-card.active .btn-play-card {
+  border-color: var(--pl-bg);
+}
+
+.pipeline-root .track-card.active .btn-play-card svg {
+  fill: var(--pl-bg);
+}
+
+.pipeline-root .track-card.active .btn-play-card:hover {
+  background: var(--pl-bg);
+}
+
+.pipeline-root .track-card.active .btn-play-card:hover svg {
+  fill: var(--pl-ink);
+}
+
 .pipeline-root .track-meta {
   display: flex;
   justify-content: space-between;
@@ -264,7 +292,15 @@
   display: flex;
   flex-direction: column;
   position: relative;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  gap: 12px;
+}
+
+.pipeline-root .canvas-area.drag-over-canvas {
+  background: #E0E0E0;
+  outline: 2px dashed var(--pl-ink);
+  outline-offset: -4px;
 }
 
 .pipeline-root .toolbar {
@@ -284,7 +320,7 @@
 }
 
 .pipeline-root .waveform-wrap {
-  flex-grow: 1;
+  flex: 0 0 33%;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -322,6 +358,21 @@
   padding: 0 20px;
   gap: 8px;
   overflow-x: auto;
+  flex-shrink: 0;
+}
+
+/* Segment / Cue cards — horizontal scroll below waveform */
+.pipeline-root .segment-list {
+  border-top: var(--pl-border);
+  display: flex;
+  overflow-x: auto;
+  gap: 12px;
+  padding: 12px 20px;
+  flex-shrink: 0;
+}
+
+.pipeline-root .segment-list .track-card {
+  min-width: 180px;
   flex-shrink: 0;
 }
 
@@ -439,6 +490,55 @@
   border: 1px solid var(--pl-ink);
   padding: 3px 8px;
   border-radius: 4px;
+}
+
+/* Tag editing section */
+.pipeline-root .tag-edit-section {
+  overflow-y: auto;
+  max-height: 50vh;
+}
+
+.pipeline-root .tag-edit-group {
+  padding: 12px 20px;
+  border-bottom: var(--pl-border);
+}
+
+.pipeline-root .tag-toggle-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.pipeline-root .tag-toggle {
+  font-size: 0.6rem;
+  font-family: var(--pl-font-mono);
+  border: 1px solid var(--pl-ink);
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--pl-ink);
+  opacity: 0.4;
+}
+
+.pipeline-root .tag-toggle:hover {
+  opacity: 0.7;
+}
+
+.pipeline-root .tag-toggle.selected {
+  background: var(--pl-ink);
+  color: var(--pl-bg);
+  opacity: 1;
+}
+
+.pipeline-root .tag-edit-actions {
+  padding: 12px 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: var(--pl-border);
 }
 
 /* Controls section */
@@ -597,6 +697,150 @@
 }
 
 /* ---------------------------------------------------------------------------
+   WAVEFORM VIEWER
+   --------------------------------------------------------------------------- */
+.wv-root {
+  width: 100%;
+}
+
+.wv-body {
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------------------------------------------------------------------------
+   SEGMENT / CUE LIST (below waveform)
+   --------------------------------------------------------------------------- */
+.pipeline-root .segment-list {
+  border: var(--pl-border);
+  border-radius: var(--pl-radius-inner);
+  background: var(--pl-surface);
+  overflow: hidden;
+  margin: 0 12px 12px;
+}
+
+.pipeline-root .segment-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: var(--pl-border);
+  background: var(--pl-bg);
+}
+
+.pipeline-root .segment-list-rows {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.pipeline-root .segment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-family: var(--pl-font-mono);
+  font-size: 0.7rem;
+  border-bottom: 1px solid rgba(8, 8, 8, 0.06);
+  transition: background 0.1s;
+}
+
+.pipeline-root .segment-row:last-child {
+  border-bottom: none;
+}
+
+.pipeline-root .segment-row:hover {
+  background: var(--pl-bg);
+}
+
+.pipeline-root .segment-row.selected {
+  background: rgba(8, 8, 8, 0.06);
+}
+
+.pipeline-root .segment-row.active {
+  background: var(--pl-ink);
+  color: var(--pl-bg);
+}
+
+.pipeline-root .segment-row-check {
+  width: 16px;
+  text-align: center;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.pipeline-root .segment-row-num {
+  width: 24px;
+  font-weight: 700;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.pipeline-root .segment-row-tc {
+  flex: 1;
+  white-space: nowrap;
+}
+
+.pipeline-root .segment-row-dur {
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+
+.pipeline-root .segment-row-meta {
+  opacity: 0.6;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.pipeline-root .segment-row-tags {
+  opacity: 0.5;
+  flex-shrink: 0;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------------------
+   CUE CARDS (post-analysis, below waveform)
+   --------------------------------------------------------------------------- */
+.pipeline-root .cue-cards-section {
+  margin: 0 12px 12px;
+}
+
+.pipeline-root .cue-cards-section .segment-list-header {
+  border: var(--pl-border);
+  border-bottom: none;
+  border-radius: var(--pl-radius-inner) var(--pl-radius-inner) 0 0;
+  background: var(--pl-bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+}
+
+.pipeline-root .cue-cards-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+  border: var(--pl-border);
+  border-radius: 0 0 var(--pl-radius-inner) var(--pl-radius-inner);
+  background: var(--pl-surface);
+  padding: 8px;
+}
+
+.pipeline-root .cue-cards-grid .track-card {
+  border-radius: 8px;
+  margin-bottom: 4px;
+}
+
+.pipeline-root .cue-cards-grid .track-card:last-child {
+  margin-bottom: 0;
+}
+
+/* ---------------------------------------------------------------------------
    SCROLLBARS
    --------------------------------------------------------------------------- */
 .pipeline-root ::-webkit-scrollbar {
@@ -611,4 +855,150 @@
 
 .pipeline-root ::-webkit-scrollbar-thumb {
   background: var(--pl-ink);
+}
+
+/* ---------------------------------------------------------------------------
+   LOGIN SCREEN
+   --------------------------------------------------------------------------- */
+.login-root {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  z-index: 1;
+}
+
+.login-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.login-eye {
+  width: 48px !important;
+  height: 28px !important;
+  border-width: 2px !important;
+}
+
+.login-eye::after {
+  width: 14px !important;
+  height: 14px !important;
+}
+
+.login-title {
+  font-size: 3rem;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+}
+
+.login-subtitle {
+  font-size: 0.85rem;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  opacity: 0.5;
+  margin-bottom: 40px;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 320px;
+}
+
+.login-input {
+  width: 100%;
+  height: 44px;
+  padding: 12px 16px;
+  border: var(--pl-border);
+  border-radius: var(--pl-radius-inner);
+  background: var(--pl-surface);
+  font-family: var(--pl-font-mono);
+  font-size: 0.85rem;
+  color: var(--pl-ink);
+  outline: none;
+}
+
+.login-input::placeholder {
+  color: #999;
+}
+
+.login-input:focus {
+  border-width: 2px;
+}
+
+.login-submit {
+  height: 44px !important;
+  font-size: 0.85rem !important;
+  margin-top: 4px;
+}
+
+.login-version {
+  margin-top: 32px;
+  font-size: 0.7rem;
+  opacity: 0.35;
+  letter-spacing: 0.1em;
+}
+
+/* ---------------------------------------------------------------------------
+   PROJECTS PAGE
+   --------------------------------------------------------------------------- */
+.projects-root {
+  display: flex;
+  flex-direction: column;
+}
+
+.projects-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.projects-heading {
+  width: 100%;
+  max-width: 800px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.projects-title {
+  font-size: 1.5rem;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.projects-grid {
+  width: 100%;
+  max-width: 800px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+}
+
+.project-card {
+  padding: 16px !important;
+  min-height: 100px;
+}
+
+.project-card.add-source {
+  min-height: 100px;
+}
+
+.new-project-form {
+  display: flex;
+  flex-direction: column;
 }

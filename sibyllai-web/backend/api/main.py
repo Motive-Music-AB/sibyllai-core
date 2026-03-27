@@ -89,6 +89,7 @@ class AnalyzeCuesRequest(BaseModel):
     segments: list[tuple[float, float]]
     fps: int = 25
     threshold: float = 0.5
+    mix_type: str = "full_mix"
 
 
 class AnalysisProgressUpdate(BaseModel):
@@ -129,6 +130,9 @@ class LibraryBuildRequest(BaseModel):
     reset: bool = True
     db_path: Optional[str] = None
     dedupe_simple: bool = True
+    segmentation_mode: str = "fixed"
+    min_section_length: float = 8.0
+    sensitivity: float = 1.0
 
 
 class LibraryMatchRequest(BaseModel):
@@ -261,7 +265,8 @@ def run_analysis_in_background(
     segments: list,
     output_path: Path,
     fps: int,
-    threshold: float
+    threshold: float,
+    mix_type: str = "full_mix"
 ):
     """Run analysis in background thread and update status dict."""
     try:
@@ -284,7 +289,8 @@ def run_analysis_in_background(
             output_dir=output_path,
             fps=fps,
             thr=threshold,
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            mix_type=mix_type
         )
 
         # Mark complete with project data
@@ -340,6 +346,9 @@ def run_library_build_in_background(job_id: str, request: LibraryBuildRequest, s
             source_name=source_name,
             source_type=source_type,
             dedupe_simple=request.dedupe_simple,
+            segmentation_mode=request.segmentation_mode,
+            min_section_length=request.min_section_length,
+            sensitivity=request.sensitivity,
         )
         library_status[job_id] = {
             "status": "complete",
@@ -470,7 +479,8 @@ async def analyze_cues(request: AnalyzeCuesRequest):
         request.segments,
         output_path,
         request.fps,
-        request.threshold
+        request.threshold,
+        request.mix_type
     )
 
     # Return immediately with session_id
@@ -699,6 +709,9 @@ async def build_library_upload(
     include_moods: bool = Form(True),
     reset: bool = Form(True),
     dedupe_simple: bool = Form(True),
+    segmentation_mode: str = Form("fixed"),
+    min_section_length: float = Form(8.0),
+    sensitivity: float = Form(1.0),
 ):
     """
     Build library index by uploading a folder of audio files from the client.
@@ -736,6 +749,9 @@ async def build_library_upload(
         include_moods=include_moods,
         reset=reset,
         dedupe_simple=dedupe_simple,
+        segmentation_mode=segmentation_mode,
+        min_section_length=min_section_length,
+        sensitivity=sensitivity,
     )
 
     executor.submit(
@@ -820,6 +836,8 @@ async def match_library(request: LibraryMatchRequest):
             match["genres"] = [name for name, _ in sorted_genres]
         else:
             match["genres"] = []
+        # Section-aware fields (already set by match_cue_to_library)
+        # segment_type, section_index, total_sections are passed through
 
     return {
         "cue_id": request.cue_id,

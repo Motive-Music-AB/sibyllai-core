@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { SibylProject, CuratedAttributes, ProjectContextCue } from './types'
 
-type Page = 'analysis' | 'cuesynch' | 'replacement' | 'licensing' | 'pipeline'
+type Page = 'login' | 'projects' | 'workspace' | 'rights' | 'delivery' | 'analysis' | 'cuesynch' | 'replacement' | 'licensing' | 'pipeline'
 type MixType = 'clean_mx' | 'full_mix'
 
 interface AppState {
@@ -33,12 +33,18 @@ interface AppState {
   sessionId: string | null
   project: SibylProject | null
 
+  // Auth state (fake)
+  isLoggedIn: boolean
+  userName: string
+
   // UI state
   activeCueId: string | null
   playingCueId: string | null
   showControls: boolean
 
   // Actions
+  setLoggedIn: (name: string) => void
+  logout: () => void
   setCurrentPage: (page: Page) => void
   setUploadedFile: (file: File, fileId: string, fileName: string, startTimecode: string, framerate: number) => void
   setStartTimecode: (tc: string) => void
@@ -68,7 +74,9 @@ interface AppState {
 }
 
 const initialState = {
-  currentPage: 'analysis' as Page,
+  currentPage: 'login' as Page,
+  isLoggedIn: false,
+  userName: '',
   uploadedFile: null,
   fileId: null,
   fileName: null,
@@ -96,8 +104,22 @@ const initialState = {
 export const useAppStore = create<AppState>((set) => ({
   ...initialState,
 
-  setCurrentPage: (page) =>
-    set({ currentPage: page }),
+  setLoggedIn: (name) => {
+    set({ isLoggedIn: true, userName: name, currentPage: 'projects' })
+    sessionStorage.setItem('motive_auth', JSON.stringify({ isLoggedIn: true, userName: name }))
+    window.history.pushState({ page: 'projects' }, '', '#/projects')
+  },
+
+  logout: () => {
+    sessionStorage.removeItem('motive_auth')
+    set({ ...initialState })
+    window.history.pushState({ page: 'login' }, '', '#/login')
+  },
+
+  setCurrentPage: (page) => {
+    set({ currentPage: page })
+    window.history.pushState({ page }, '', `#/${page}`)
+  },
 
   setUploadedFile: (file, fileId, fileName, startTimecode, framerate) =>
     set({ uploadedFile: file, fileId, fileName, startTimecode, framerate }),

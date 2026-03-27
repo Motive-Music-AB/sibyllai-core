@@ -1,11 +1,26 @@
-import { useState, useRef, useEffect, useCallback, type DragEvent, type ChangeEvent } from 'react'
-import WaveSurfer from 'wavesurfer.js'
-import RegionsPlugin from 'wavesurfer.js/dist/plugins/regions'
+import { useState, useEffect, useRef, useCallback, type DragEvent, type ChangeEvent } from 'react'
 import { useAppStore } from '@/lib/store'
 import { api } from '@/lib/api'
 import { secondsToTimecode } from '@/lib/timecode'
-import type { Cue } from '@/lib/types'
+import { WaveformViewer } from '@/components/WaveformViewer'
+import { CueCard } from '@/components/CueCard'
+import { AddItemCombobox } from '@/components/AddItemCombobox'
+import {
+  YAMNET_INSTRUMENTS,
+  YAMNET_GENRES,
+  CLAP_STYLES,
+  INSTRUMENT_THRESHOLD,
+  GENRE_THRESHOLD,
+  STYLE_THRESHOLD,
+} from '@/lib/constants'
+import type { CuratedAttributes } from '@/lib/types'
 import './motive-pipeline.css'
+
+/* -- Mix type defaults (from v1 ThresholdControls) ---------------------- */
+const MIX_TYPE_DEFAULTS = {
+  clean_mx: { musicThreshold: 0.5, silenceThreshold: 0.0005 },
+  full_mix: { musicThreshold: 0.2, silenceThreshold: 0.01 },
+}
 
 function fmtDur(sec: number): string {
   const m = Math.floor(sec / 60)
@@ -13,24 +28,34 @@ function fmtDur(sec: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
-/* =========================================================================
-   SVG Icons — simple inline vectors for the brutalist UI
-   ========================================================================= */
-const PlayIcon = () => (
-  <svg viewBox="0 0 24 24"><polygon points="8,5 19,12 8,19" /></svg>
-)
-const PauseIcon = () => (
-  <svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" /><rect x="14" y="5" width="4" height="14" /></svg>
-)
-const StopIcon = () => (
-  <svg viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" /></svg>
-)
-const PrevIcon = () => (
-  <svg viewBox="0 0 24 24"><rect x="4" y="5" width="3" height="14" /><polygon points="20,5 9,12 20,19" /></svg>
-)
-const NextIcon = () => (
-  <svg viewBox="0 0 24 24"><rect x="17" y="5" width="3" height="14" /><polygon points="4,5 15,12 4,19" /></svg>
-)
+/** Dynamic precision for small slider values */
+function fmtPrecision(v: number): string {
+  if (v < 0.001) return v.toFixed(6)
+  if (v < 0.01) return v.toFixed(4)
+  return v.toFixed(2)
+}
+
+/** Get items to display: detected items above threshold + curated items */
+function getDisplayItems(
+  detected: Record<string, number> | undefined,
+  curated: string[] | undefined,
+  threshold: number
+): [string, number][] {
+  const detectedMap = detected || {}
+  const curatedSet = new Set(curated || [])
+
+  const items = Object.entries(detectedMap)
+    .filter(([name, score]) => score >= threshold || curatedSet.has(name))
+    .sort((a, b) => b[1] - a[1])
+
+  const detectedNames = new Set(items.map(([name]) => name))
+  for (const name of curatedSet) {
+    if (!detectedNames.has(name)) {
+      items.push([name, 0])
+    }
+  }
+  return items
+}
 
 /* =========================================================================
    MAIN COMPONENT
@@ -49,123 +74,93 @@ export function MotivePipeline() {
     isAnalyzing, setIsAnalyzing,
     analysisProgress, analysisStatus, setAnalysisProgress,
     project, sessionId,
-    activeCueId, setActiveCueId, setPlayingCueId,
+    activeCueId, setActiveCueId,
+    startTimecode,
     setUploadedFile, setSegments, setProject,
-    framerate, startTimecode,
+    updateCueInProject, resetToSegmentation,
+    framerate,
     setCurrentPage, reset,
   } = useAppStore()
 
   /* -- Local state ------------------------------------------------------ */
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [isReady, setIsReady] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
   const [isDragOver, setIsDragOver] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [isEditingTags, setIsEditingTags] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [localCurated, setLocalCurated] = useState<CuratedAttributes | null>(null)
 
   /* -- Refs ------------------------------------------------------------- */
-  const waveformRef = useRef<HTMLDivElement>(null)
-  const wsRef = useRef<WaveSurfer | null>(null)
-  const regionsRef = useRef<RegionsPlugin | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const lastTcRef = useRef(0)
 
   /* -- Derived ---------------------------------------------------------- */
-  const activeCue: Cue | null = project?.cues.find(c => c.id === activeCueId) ?? null
+  const activeCue = project?.cues.find(c => c.id === activeCueId) ?? null
   const cuesSorted = project ? [...project.cues].sort((a, b) => a.start - b.start) : []
   const itemCount = project ? cuesSorted.length : segments.length
+  const cueStatus = activeCue?.project_context?.status
+  const isMatched = cueStatus === 'matched'
+
+  /* -- Sync local curated state with active cue -- */
+  useEffect(() => {
+    if (activeCue) {
+      setLocalCurated(activeCue.musical_profile.curated)
+      setIsEditingTags(false)
+    } else {
+      setLocalCurated(null)
+      setIsEditingTags(false)
+    }
+  }, [activeCue?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   /* =====================================================================
-     WAVESURFER
+     TAG EDITING
      ===================================================================== */
-  useEffect(() => {
-    if (!waveformRef.current || !uploadedFile || !fileId) return
-
-    const ws = WaveSurfer.create({
-      container: waveformRef.current,
-      waveColor: '#080808',
-      progressColor: '#555',
-      cursorColor: '#080808',
-      cursorWidth: 1,
-      barWidth: 4,
-      barGap: 2,
-      barRadius: 2,
-      height: 'auto',
-      normalize: true,
+  const toggleItem = (category: keyof CuratedAttributes, item: string) => {
+    setLocalCurated((prev) => {
+      if (!prev) return prev
+      const current = (prev[category] as string[]) || []
+      const updated = current.includes(item)
+        ? current.filter((i) => i !== item)
+        : [...current, item]
+      return { ...prev, [category]: updated }
     })
+  }
 
-    const regions = ws.registerPlugin(RegionsPlugin.create())
-    wsRef.current = ws
-    regionsRef.current = regions
-
-    const url = URL.createObjectURL(uploadedFile)
-    ws.load(url)
-
-    ws.on('ready', () => {
-      setIsReady(true)
-      setCurrentTime(0)
-      setTimeout(() => {
-        if (wsRef.current !== ws) return
-        try {
-          const dur = ws.getDuration()
-          const maxLen = Math.min(2000, Math.max(100, Math.ceil(dur * 50)))
-          const peaks = ws.exportPeaks({ maxLength: maxLen })
-          ws.setOptions({ peaks, duration: dur })
-        } catch {}
-      }, 0)
+  const addItem = (category: keyof CuratedAttributes, item: string) => {
+    setLocalCurated((prev) => {
+      if (!prev) return prev
+      const current = (prev[category] as string[]) || []
+      if (current.includes(item)) return prev
+      return { ...prev, [category]: [...current, item] }
     })
+  }
 
-    ws.on('play', () => setIsPlaying(true))
-    ws.on('pause', () => setIsPlaying(false))
-    ws.on('audioprocess', (t) => {
-      const now = Date.now()
-      if (now - lastTcRef.current < 50) return
-      lastTcRef.current = now
-      setCurrentTime(t)
-    })
-    ws.on('seeking', (t) => setCurrentTime(t))
-    ws.on('click', () => setCurrentTime(ws.getCurrentTime()))
-
-    return () => {
-      URL.revokeObjectURL(url)
-      ws.destroy()
-      wsRef.current = null
-      regionsRef.current = null
-      setIsReady(false)
-      setIsPlaying(false)
-    }
-  }, [uploadedFile, fileId])
-
-  /* -- Sync regions ----------------------------------------------------- */
-  useEffect(() => {
-    const regions = regionsRef.current
-    if (!regions || !isReady) return
-    regions.clearRegions()
-
-    const segs = project
-      ? cuesSorted.map(c => [c.start, c.end] as [number, number])
-      : segments
-
-    segs.forEach(([start, end], i) => {
-      const isSelected = selectedSegments.some(
-        ([s, e]) => Math.abs(s - start) < 0.5 && Math.abs(e - end) < 0.5
-      )
-      const isCueActive = project && cuesSorted[i]?.id === activeCueId
-
-      regions.addRegion({
-        start,
-        end,
-        color: isCueActive
-          ? 'rgba(8,8,8,0.12)'
-          : isSelected
-          ? 'rgba(8,8,8,0.06)'
-          : 'rgba(0,0,0,0.02)',
-        drag: false,
-        resize: false,
+  const handleSaveTags = async () => {
+    if (!sessionId || !activeCue || !localCurated) return
+    setIsSaving(true)
+    try {
+      await api.updateCue(sessionId, activeCue.id, {
+        instruments: localCurated.instruments,
+        genres: localCurated.genres,
+        style: localCurated.style,
+        moods: localCurated.moods,
       })
-    })
-  }, [segments, selectedSegments, isReady, activeCueId, project])
+      updateCueInProject(activeCue.id, localCurated)
+      setIsEditingTags(false)
+    } catch {
+      setError('Failed to save cue tags')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleCancelTags = () => {
+    if (activeCue) {
+      setLocalCurated(activeCue.musical_profile.curated)
+    }
+    setIsEditingTags(false)
+  }
 
   /* =====================================================================
      FILE UPLOAD
@@ -205,34 +200,14 @@ export function MotivePipeline() {
   }, [handleFileSelect])
 
   /* =====================================================================
-     TRANSPORT
+     MIX TYPE WITH AUTO-DEFAULTS
      ===================================================================== */
-  const handlePlay = useCallback(() => wsRef.current?.playPause(), [])
-
-  const handleStop = useCallback(() => {
-    const ws = wsRef.current
-    if (!ws) return
-    ws.pause()
-    ws.setTime(0)
-  }, [])
-
-  const handlePrev = useCallback(() => {
-    const ws = wsRef.current
-    if (!ws) return
-    const pos = ws.getCurrentTime()
-    const starts = project ? cuesSorted.map(c => c.start) : segments.map(([s]) => s)
-    const prev = [...starts].reverse().find(s => s < pos - 0.5)
-    ws.setTime(prev ?? 0)
-  }, [segments, project, cuesSorted])
-
-  const handleNext = useCallback(() => {
-    const ws = wsRef.current
-    if (!ws) return
-    const pos = ws.getCurrentTime()
-    const starts = project ? cuesSorted.map(c => c.start) : segments.map(([s]) => s)
-    const next = starts.find(s => s > pos + 0.5)
-    if (next !== undefined) ws.setTime(next)
-  }, [segments, project, cuesSorted])
+  const handleMixTypeChange = useCallback((type: 'clean_mx' | 'full_mix') => {
+    setMixType(type)
+    const defaults = MIX_TYPE_DEFAULTS[type]
+    setMusicThreshold(defaults.musicThreshold)
+    setSilenceThreshold(defaults.silenceThreshold)
+  }, [setMixType, setMusicThreshold, setSilenceThreshold])
 
   /* =====================================================================
      SEGMENT PREVIEW
@@ -270,6 +245,7 @@ export function MotivePipeline() {
         file_id: fileId,
         segments: selectedSegments,
         fps: framerate,
+        mix_type: mixType,
       })
       const interval = setInterval(async () => {
         try {
@@ -297,32 +273,16 @@ export function MotivePipeline() {
     }
   }, [fileId, selectedSegments, framerate, setIsAnalyzing, setAnalysisProgress, setProject])
 
-  /* =====================================================================
-     SEGMENT / CUE CLICK
-     ===================================================================== */
-  const handleSegClick = useCallback((idx: number) => {
-    if (project && cuesSorted[idx]) {
-      const cue = cuesSorted[idx]
-      setActiveCueId(cue.id)
-      setPlayingCueId(cue.id)
-      wsRef.current?.setTime(cue.start)
-    } else if (segments[idx]) {
-      wsRef.current?.setTime(segments[idx][0])
-    }
-  }, [project, cuesSorted, segments, setActiveCueId, setPlayingCueId])
-
-  const toggleSeg = useCallback((start: number, end: number) => {
-    const isSelected = selectedSegments.some(
-      ([s, e]) => Math.abs(s - start) < 0.5 && Math.abs(e - end) < 0.5
-    )
-    if (isSelected) {
-      setSelectedSegments(selectedSegments.filter(
-        ([s, e]) => !(Math.abs(s - start) < 0.5 && Math.abs(e - end) < 0.5)
-      ))
-    } else {
-      setSelectedSegments([...selectedSegments, [start, end]])
-    }
-  }, [selectedSegments, setSelectedSegments])
+  /* -- Detected items for tag editing -- */
+  const detectedInstruments = activeCue && localCurated
+    ? getDisplayItems(activeCue.musical_profile.detected?.instruments_yamnet, localCurated.instruments, INSTRUMENT_THRESHOLD)
+    : []
+  const detectedGenres = activeCue && localCurated
+    ? getDisplayItems(activeCue.musical_profile.detected?.genres_yamnet, localCurated.genres, GENRE_THRESHOLD)
+    : []
+  const detectedStyles = activeCue && localCurated
+    ? getDisplayItems(activeCue.musical_profile.detected?.clap_style, localCurated.style, STYLE_THRESHOLD)
+    : []
 
   /* =====================================================================
      RENDER
@@ -379,49 +339,6 @@ export function MotivePipeline() {
               </div>
             )}
 
-            {/* Analyzed cues */}
-            {cuesSorted.map((cue, i) => (
-              <div
-                key={cue.id}
-                className={`track-card ${cue.id === activeCueId ? 'active' : ''}`}
-                onClick={() => handleSegClick(i)}
-              >
-                <div className="track-card-inner">
-                  <span className="track-card-name">
-                    {cue.name || `Cue_${String(i + 1).padStart(2, '0')}`}
-                  </span>
-                  <span className="tag">{cue.musical_profile.key || '?'}</span>
-                </div>
-                <div className="track-meta">
-                  <span>{fmtDur(cue.end - cue.start)}</span>
-                  <span>{cue.musical_profile.bpm?.toFixed(0) || '?'} BPM</span>
-                </div>
-              </div>
-            ))}
-
-            {/* Non-analyzed segments */}
-            {!project && segments.map(([start, end], i) => {
-              const isSel = selectedSegments.some(
-                ([s, e]) => Math.abs(s - start) < 0.5 && Math.abs(e - end) < 0.5
-              )
-              return (
-                <div
-                  key={i}
-                  className={`track-card ${isSel ? 'active' : ''}`}
-                  onClick={() => toggleSeg(start, end)}
-                >
-                  <div className="track-card-inner">
-                    <span className="track-card-name">Seg_{String(i + 1).padStart(2, '0')}</span>
-                    <span className="tag">{isSel ? '✓' : '○'}</span>
-                  </div>
-                  <div className="track-meta">
-                    <span>{fmtDur(start)} — {fmtDur(end)}</span>
-                    <span>{fmtDur(end - start)}</span>
-                  </div>
-                </div>
-              )
-            })}
-
             {/* Add source / upload */}
             <div
               className={`track-card add-source ${isDragOver ? 'drag-over' : ''}`}
@@ -430,11 +347,10 @@ export function MotivePipeline() {
               onDrop={handleDrop}
               onClick={() => fileInputRef.current?.click()}
             >
-              <div className="track-card-inner">
+              <div className="track-card-inner" style={{ justifyContent: 'center' }}>
                 <span className="track-card-name" style={{ opacity: 0.5 }}>
-                  {isUploading ? `Uploading ${uploadProgress}%` : 'Add Source'}
+                  {isUploading ? `Uploading ${uploadProgress}%` : '+ Add Source'}
                 </span>
-                <span className="tag">+</span>
               </div>
               {isUploading && (
                 <div className="upload-bar">
@@ -453,48 +369,47 @@ export function MotivePipeline() {
         </aside>
 
         {/* ---------- CENTER CANVAS ---------- */}
-        <main className="canvas-area">
-          {/* Toolbar */}
+        <main
+          className={`canvas-area ${isDragOver && !uploadedFile ? 'drag-over-canvas' : ''}`}
+          onDragOver={handleDragOver}
+          onDragLeave={() => setIsDragOver(false)}
+          onDrop={handleDrop}
+        >
+          {/* Mix type toggle toolbar */}
           <div className="toolbar">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <button className="btn-icon" onClick={handlePrev} title="Prev"><PrevIcon /></button>
-              <button className="btn-icon" onClick={handlePlay} title={isPlaying ? 'Pause' : 'Play'}>
-                {isPlaying ? <PauseIcon /> : <PlayIcon />}
-              </button>
-              <button className="btn-icon" onClick={handleStop} title="Stop"><StopIcon /></button>
-              <button className="btn-icon" onClick={handleNext} title="Next"><NextIcon /></button>
-            </div>
-
-            <div className="time-display">
-              {secondsToTimecode(currentTime, framerate, startTimecode)}
-            </div>
-
+            {/* Event counter */}
+            {!project && segments.length > 0 && !isAnalyzing && (
+              <span className="mono" style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.1em' }}>
+                {segments.length} EVENT{segments.length !== 1 ? 'S' : ''} DETECTED
+              </span>
+            )}
+            {/* Selection counter */}
+            {!project && segments.length > 0 && !isAnalyzing && (
+              <span className="mono" style={{ fontSize: '0.65rem', opacity: 0.6 }}>
+                {selectedSegments.length} OF {segments.length} SELECTED
+              </span>
+            )}
             <div style={{ flexGrow: 1 }} />
-
-            {/* Mix type toggle */}
             <button
               className={`btn-pill ${mixType === 'clean_mx' ? 'primary' : ''}`}
-              onClick={() => setMixType('clean_mx')}
+              onClick={() => handleMixTypeChange('clean_mx')}
               style={{ fontSize: '0.65rem' }}
             >
               Clean MX
             </button>
             <button
               className={`btn-pill ${mixType === 'full_mix' ? 'primary' : ''}`}
-              onClick={() => setMixType('full_mix')}
+              onClick={() => handleMixTypeChange('full_mix')}
               style={{ fontSize: '0.65rem' }}
             >
               Full Mix
             </button>
           </div>
 
-          {/* Waveform area */}
+          {/* WaveformViewer — full featured: zoom, drag, split, etc. */}
           <div className="waveform-wrap">
-            <div className="grid-lines" />
             {fileId && uploadedFile ? (
-              <div className="waveform-inner">
-                <div ref={waveformRef} />
-              </div>
+              <WaveformViewer />
             ) : (
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <span className="mono" style={{
@@ -507,45 +422,79 @@ export function MotivePipeline() {
                 </span>
               </div>
             )}
-
-            {/* Segment lane */}
-            {(segments.length > 0 || cuesSorted.length > 0) && (
-              <div className="segment-lane">
-                {project ? (
-                  cuesSorted.map((cue, i) => (
-                    <button
-                      key={cue.id}
-                      className={`seg-chip ${cue.id === activeCueId ? 'active' : ''}`}
-                      onClick={() => handleSegClick(i)}
-                    >
-                      #{i + 1} {cue.musical_profile.key || ''} {fmtDur(cue.start)}
-                    </button>
-                  ))
-                ) : (
-                  segments.map(([start, end], i) => {
-                    const isSel = selectedSegments.some(
-                      ([s, e]) => Math.abs(s - start) < 0.5 && Math.abs(e - end) < 0.5
-                    )
-                    return (
-                      <button
-                        key={i}
-                        className={`seg-chip ${isSel ? 'selected' : ''}`}
-                        onClick={() => toggleSeg(start, end)}
-                      >
-                        S{i + 1} {fmtDur(start)}
-                      </button>
-                    )
-                  })
-                )}
-              </div>
-            )}
           </div>
+
+          {/* ---- SEGMENT / CUE LIST ---- */}
+          {!project && segments.length > 0 && (
+            <div className="segment-list">
+              <div className="segment-list-header">
+                <span className="label">Segments</span>
+                <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>
+                  {selectedSegments.length}/{segments.length} selected
+                </span>
+              </div>
+              <div className="segment-list-rows">
+                {segments.map(([start, end], i) => {
+                  const isSelected = selectedSegments.some(
+                    ([s, e]) => Math.abs(s - start) < 0.01 && Math.abs(e - end) < 0.01
+                  )
+                  const tc0 = secondsToTimecode(start, framerate, startTimecode)
+                  const tc1 = secondsToTimecode(end, framerate, startTimecode)
+                  const dur = end - start
+                  return (
+                    <div
+                      key={i}
+                      className={`segment-row ${isSelected ? 'selected' : ''}`}
+                      onClick={() => {
+                        if (isSelected) {
+                          setSelectedSegments(
+                            selectedSegments.filter(
+                              ([s, e]) => !(Math.abs(s - start) < 0.01 && Math.abs(e - end) < 0.01)
+                            )
+                          )
+                        } else {
+                          setSelectedSegments([...selectedSegments, [start, end]])
+                        }
+                      }}
+                    >
+                      <span className="segment-row-check">{isSelected ? '✓' : ''}</span>
+                      <span className="segment-row-num">{i + 1}</span>
+                      <span className="segment-row-tc">{tc0} — {tc1}</span>
+                      <span className="segment-row-dur">{fmtDur(dur)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {project && cuesSorted.length > 0 && (
+            <div className="cue-cards-section">
+              <div className="segment-list-header">
+                <span className="label">Analysis Results</span>
+                <span className="mono" style={{ fontSize: '0.6rem', opacity: 0.5 }}>
+                  {cuesSorted.length} cues — click to view, click again to edit
+                </span>
+              </div>
+              <div className="cue-cards-grid">
+                {cuesSorted.map((cue) => {
+                  const segIndex = segments.findIndex(([s, e]) =>
+                    Math.abs(s - cue.start) < 0.5 && Math.abs(e - cue.end) < 0.5
+                  )
+                  return <CueCard key={cue.id} cue={cue} index={segIndex >= 0 ? segIndex : 0} />
+                })}
+              </div>
+            </div>
+          )}
         </main>
 
         {/* ---------- RIGHT INSPECTOR ---------- */}
         <aside className="inspector">
           <div className="panel-header">
             <span className="label">Analysis Data</span>
+            {activeCue && isMatched && (
+              <span className="tag" style={{ background: 'var(--pl-ink)', color: 'var(--pl-bg)' }}>MATCHED</span>
+            )}
           </div>
 
           {/* Data cells — show active cue info or placeholders */}
@@ -578,41 +527,151 @@ export function MotivePipeline() {
             </div>
           </div>
 
-          {/* Instruments + genres as tags */}
-          {activeCue && (
+          {/* ---- TAG EDITING SECTION ---- */}
+          {activeCue && localCurated && (
             <>
+              {/* Instruments */}
               <div className="panel-header" style={{ borderTop: 'var(--pl-border)' }}>
                 <span className="label">Instruments</span>
-              </div>
-              <div className="tag-list">
-                {activeCue.musical_profile.curated.instruments.map(inst => (
-                  <span key={inst} className="tag-item">{inst}</span>
-                ))}
-                {activeCue.musical_profile.curated.instruments.length === 0 && (
-                  <span className="mono" style={{ fontSize: '0.7rem', opacity: 0.5 }}>None detected</span>
+                {!isEditingTags && (
+                  <button
+                    className="btn-pill"
+                    style={{ height: 24, fontSize: '0.6rem', padding: '0 10px' }}
+                    onClick={() => setIsEditingTags(true)}
+                  >
+                    Edit
+                  </button>
                 )}
               </div>
 
-              <div className="panel-header" style={{ borderTop: 'var(--pl-border)' }}>
-                <span className="label">Genre / Style</span>
-              </div>
-              <div className="tag-list">
-                {[...activeCue.musical_profile.curated.genres, ...activeCue.musical_profile.curated.style].map(t => (
-                  <span key={t} className="tag-item">{t}</span>
-                ))}
-              </div>
-
-              {activeCue.musical_profile.curated.moods.length > 0 && (
+              {!isEditingTags ? (
+                /* -- Read-only tag display -- */
                 <>
+                  <div className="tag-list">
+                    {localCurated.instruments.map(inst => (
+                      <span key={inst} className="tag-item">{inst}</span>
+                    ))}
+                    {localCurated.instruments.length === 0 && (
+                      <span className="mono" style={{ fontSize: '0.7rem', opacity: 0.5 }}>None detected</span>
+                    )}
+                  </div>
+
                   <div className="panel-header" style={{ borderTop: 'var(--pl-border)' }}>
-                    <span className="label">Moods</span>
+                    <span className="label">Genre / Style</span>
                   </div>
                   <div className="tag-list">
-                    {activeCue.musical_profile.curated.moods.map(m => (
-                      <span key={m} className="tag-item">{m}</span>
+                    {[...localCurated.genres, ...localCurated.style].map(t => (
+                      <span key={t} className="tag-item">{t}</span>
                     ))}
+                    {localCurated.genres.length === 0 && localCurated.style.length === 0 && (
+                      <span className="mono" style={{ fontSize: '0.7rem', opacity: 0.5 }}>None detected</span>
+                    )}
                   </div>
+
+                  {localCurated.moods.length > 0 && (
+                    <>
+                      <div className="panel-header" style={{ borderTop: 'var(--pl-border)' }}>
+                        <span className="label">Moods</span>
+                      </div>
+                      <div className="tag-list">
+                        {localCurated.moods.map(m => (
+                          <span key={m} className="tag-item">{m}</span>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </>
+              ) : (
+                /* -- Editable tag section -- */
+                <div className="tag-edit-section">
+                  {/* Instruments edit */}
+                  <div className="tag-edit-group">
+                    <div className="tag-toggle-list">
+                      {detectedInstruments.map(([name, score]) => {
+                        const isSelected = localCurated.instruments?.includes(name)
+                        return (
+                          <button
+                            key={name}
+                            onClick={() => toggleItem('instruments', name)}
+                            className={`tag-toggle ${isSelected ? 'selected' : ''}`}
+                          >
+                            {name} ({score.toFixed(3)})
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <AddItemCombobox
+                      suggestions={YAMNET_INSTRUMENTS}
+                      existingItems={localCurated.instruments}
+                      onAdd={(item) => addItem('instruments', item)}
+                      placeholder="Add instrument..."
+                    />
+                  </div>
+
+                  {/* Genres edit */}
+                  <div className="panel-header" style={{ borderTop: 'var(--pl-border)' }}>
+                    <span className="label">Genres</span>
+                  </div>
+                  <div className="tag-edit-group">
+                    <div className="tag-toggle-list">
+                      {detectedGenres.map(([name, score]) => {
+                        const isSelected = localCurated.genres?.includes(name)
+                        return (
+                          <button
+                            key={name}
+                            onClick={() => toggleItem('genres', name)}
+                            className={`tag-toggle ${isSelected ? 'selected' : ''}`}
+                          >
+                            {name} ({score.toFixed(3)})
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <AddItemCombobox
+                      suggestions={YAMNET_GENRES}
+                      existingItems={localCurated.genres}
+                      onAdd={(item) => addItem('genres', item)}
+                      placeholder="Add genre..."
+                    />
+                  </div>
+
+                  {/* Style edit */}
+                  <div className="panel-header" style={{ borderTop: 'var(--pl-border)' }}>
+                    <span className="label">Style</span>
+                  </div>
+                  <div className="tag-edit-group">
+                    <div className="tag-toggle-list">
+                      {detectedStyles.map(([name, score]) => {
+                        const isSelected = localCurated.style?.includes(name)
+                        return (
+                          <button
+                            key={name}
+                            onClick={() => toggleItem('style', name)}
+                            className={`tag-toggle ${isSelected ? 'selected' : ''}`}
+                          >
+                            {name} ({score.toFixed(3)})
+                          </button>
+                        )
+                      })}
+                    </div>
+                    <AddItemCombobox
+                      suggestions={CLAP_STYLES}
+                      existingItems={localCurated.style}
+                      onAdd={(item) => addItem('style', item)}
+                      placeholder="Add style..."
+                    />
+                  </div>
+
+                  {/* Save / Cancel */}
+                  <div className="tag-edit-actions">
+                    <button className="btn-pill" onClick={handleCancelTags} disabled={isSaving}>
+                      Cancel
+                    </button>
+                    <button className="btn-pill primary" onClick={handleSaveTags} disabled={isSaving}>
+                      {isSaving ? 'Saving...' : 'Save'}
+                    </button>
+                  </div>
+                </div>
               )}
             </>
           )}
@@ -631,40 +690,98 @@ export function MotivePipeline() {
             </>
           )}
 
-          {/* Controls */}
+          {/* ---- DETECTION SETTINGS ---- */}
           {!project && (
             <>
               <div className="panel-header" style={{ borderTop: 'var(--pl-border)' }}>
                 <span className="label">Detection Settings</span>
               </div>
               <div className="controls-section">
+                {/* Primary threshold */}
                 <div className="control-row">
                   <span className="label">Threshold</span>
                   <input
-                    type="range" min={0.01} max={1} step={0.01}
+                    type="range" min={0.001} max={0.03} step={0.0001}
                     value={musicThreshold}
                     onChange={e => setMusicThreshold(parseFloat(e.target.value))}
                   />
-                  <span className="data-val">{musicThreshold.toFixed(2)}</span>
+                  <span className="data-val">{fmtPrecision(musicThreshold)}</span>
                 </div>
+
+                {/* Min Gap */}
                 <div className="control-row">
                   <span className="label">Min Gap</span>
                   <input
-                    type="range" min={0.5} max={5} step={0.1}
+                    type="range" min={0.1} max={15.0} step={0.1}
                     value={minGap}
                     onChange={e => setMinGap(parseFloat(e.target.value))}
                   />
                   <span className="data-val">{minGap.toFixed(1)}s</span>
                 </div>
+
+                {/* Min Cue */}
                 <div className="control-row">
                   <span className="label">Min Cue</span>
                   <input
-                    type="range" min={1} max={10} step={0.5}
+                    type="range" min={0.5} max={15.0} step={0.1}
                     value={minCueLength}
                     onChange={e => setMinCueLength(parseFloat(e.target.value))}
                   />
                   <span className="data-val">{minCueLength.toFixed(1)}s</span>
                 </div>
+
+                {/* Advanced Settings Toggle */}
+                <button
+                  className="btn-pill"
+                  onClick={() => setShowAdvanced(!showAdvanced)}
+                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.6rem', height: 28 }}
+                >
+                  {showAdvanced ? 'Hide Advanced' : 'Advanced Settings'}
+                </button>
+
+                {/* Advanced: Silence Threshold */}
+                <div
+                  style={{
+                    maxHeight: showAdvanced ? '200px' : '0px',
+                    opacity: showAdvanced ? 1 : 0,
+                    overflow: 'hidden',
+                    transition: 'max-height 0.3s ease, opacity 0.3s ease',
+                  }}
+                >
+                  <div className="control-row" style={{ paddingTop: 8 }}>
+                    <span className="label">Silence</span>
+                    <input
+                      type="range" min={0.0001} max={0.1} step={0.0001}
+                      value={silenceThreshold}
+                      onChange={e => setSilenceThreshold(parseFloat(e.target.value))}
+                    />
+                    <span className="data-val">{fmtPrecision(silenceThreshold)}</span>
+                  </div>
+                </div>
+
+                {/* Detect Segments button inside controls */}
+                {fileId && segments.length === 0 && !isAnalyzing && (
+                  <button
+                    className="btn-pill primary"
+                    onClick={handlePreview}
+                    disabled={isSegmenting}
+                    style={{ width: '100%', justifyContent: 'center', marginTop: 4 }}
+                  >
+                    {isSegmenting ? 'Detecting...' : 'Detect Segments'}
+                  </button>
+                )}
+
+                {/* Re-detect button when segments exist */}
+                {fileId && segments.length > 0 && !isAnalyzing && (
+                  <button
+                    className="btn-pill"
+                    onClick={handlePreview}
+                    disabled={isSegmenting}
+                    style={{ width: '100%', justifyContent: 'center', marginTop: 4, fontSize: '0.6rem', height: 28 }}
+                  >
+                    {isSegmenting ? 'Detecting...' : 'Re-detect'}
+                  </button>
+                )}
               </div>
             </>
           )}
@@ -672,7 +789,7 @@ export function MotivePipeline() {
           {/* Error */}
           {error && <div style={{ padding: '0 20px' }}><div className="error-msg">{error}</div></div>}
 
-          {/* Progress */}
+          {/* Progress + DO NOT CLOSE warning */}
           {isAnalyzing && (
             <div style={{ padding: '12px 20px' }}>
               <div className="mono" style={{ fontSize: '0.65rem', marginBottom: 4 }}>
@@ -680,6 +797,9 @@ export function MotivePipeline() {
               </div>
               <div className="progress-bar">
                 <div className="progress-fill" style={{ width: `${analysisProgress}%` }} />
+              </div>
+              <div className="mono" style={{ fontSize: '0.55rem', marginTop: 6, textAlign: 'center', letterSpacing: '0.1em', fontWeight: 700 }}>
+                DO NOT CLOSE THIS TAB &middot; {Math.round(analysisProgress)}%
               </div>
             </div>
           )}
@@ -716,13 +836,18 @@ export function MotivePipeline() {
             )}
             {isAnalyzing && (
               <button className="btn-pill" disabled style={{ width: '100%', justifyContent: 'center' }}>
-                Analyzing {analysisProgress}%
+                Analyzing {Math.round(analysisProgress)}%
               </button>
             )}
             {project && (
-              <button className="btn-pill primary" onClick={() => setCurrentPage('cuesynch')} style={{ width: '100%', justifyContent: 'center' }}>
-                Export Data
-              </button>
+              <>
+                <button className="btn-pill" onClick={() => resetToSegmentation()} style={{ width: '100%', justifyContent: 'center', fontSize: '0.6rem', height: 28 }}>
+                  Back to Segments
+                </button>
+                <button className="btn-pill primary" onClick={() => setCurrentPage('cuesynch')} style={{ width: '100%', justifyContent: 'center' }}>
+                  Export Data
+                </button>
+              </>
             )}
             {!fileId && (
               <button className="btn-pill" disabled style={{ width: '100%', justifyContent: 'center' }}>

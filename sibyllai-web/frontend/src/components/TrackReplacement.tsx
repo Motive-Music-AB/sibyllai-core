@@ -1,14 +1,100 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { useAppStore } from '@/lib/store'
 import { WaveformViewer } from '@/components/WaveformViewer'
-import { CueCard } from '@/components/CueCard'
 import { LibraryManager } from '@/components/LibraryManager'
 import type { LibraryMatch } from '@/lib/types'
+import { secondsToTimecode } from '@/lib/timecode'
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DESIGN TOKENS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+const CANVAS = '#D6D6D4'
+const BENTO = '#EBEBEB'
+const LIST_BG = '#F3F3F1'
+const ACCENT = '#FFD659'
+const TEXT_SUB = '#4A4A4A'
+
+const titleHeavy: React.CSSProperties = { fontWeight: 800, letterSpacing: '-0.04em' }
+const labelBold: React.CSSProperties = {
+  fontWeight: 700, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: TEXT_SUB,
+}
+
+const pillBtn: React.CSSProperties = {
+  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  padding: '8px 20px', borderRadius: 999, fontWeight: 700, fontSize: 13,
+  border: 'none', cursor: 'pointer', transition: 'all 0.2s',
+  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ICONS
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+function ArrowLeftIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 12H5M12 19l-7-7 7-7" />
+    </svg>
+  )
+}
+
+function PlayIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <path d="M8 5.14v13.72a1 1 0 0 0 1.5.86l11.72-6.86a1 1 0 0 0 0-1.72L9.5 4.28A1 1 0 0 0 8 5.14z" />
+    </svg>
+  )
+}
+
+function StopIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  )
+}
+
+function SearchIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.35-4.35" />
+    </svg>
+  )
+}
+
+function CheckIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
+function UndoIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7v6h6" /><path d="M3 13a9 9 0 0 1 15.36-6.36L21 9" />
+    </svg>
+  )
+}
+
+function LibraryIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" /><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15z" />
+    </svg>
+  )
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+   ═══════════════════════════════════════════════════════════════════════════ */
 
 export function TrackReplacement() {
-  const { project, fileName, sessionId, activeCueId, setActiveCueId, updateCueContext, setCurrentPage, reset, segments } = useAppStore()
+  const { project, fileName, sessionId, activeCueId, setActiveCueId, updateCueContext, setCurrentPage, reset, segments, userName, startTimecode, framerate } = useAppStore()
 
   const cueCount = project?.cues.length ?? 0
   const cueOptions = useMemo(
@@ -16,10 +102,7 @@ export function TrackReplacement() {
     [project]
   )
 
-  // Tab state
   const [activeTab, setActiveTab] = useState<'match' | 'library'>('match')
-
-  // Library build state (shared between Match and Library tabs)
   const [libraryFiles, setLibraryFiles] = useState<File[]>([])
   const [libraryFolderName, setLibraryFolderName] = useState<string | null>(null)
   const [buildJobId, setBuildJobId] = useState<string | null>(null)
@@ -33,22 +116,23 @@ export function TrackReplacement() {
   const [isBuilding, setIsBuilding] = useState(false)
   const [isUploading, setIsUploading] = useState(false)
   const [indexAvailable, setIndexAvailable] = useState(false)
-  const [indexInfo, setIndexInfo] = useState<{
-    tracks: number
-    windows: number
-  } | null>(null)
+  const [indexInfo, setIndexInfo] = useState<{ tracks: number; windows: number } | null>(null)
+  const [segmentationMode, setSegmentationMode] = useState<'fixed' | 'structure'>('structure')
+  const [minSectionLength, setMinSectionLength] = useState(8)
 
-  // Match state
   const [selectedCueId, setSelectedCueId] = useState<string | null>(activeCueId)
   const [matchesByCue, setMatchesByCue] = useState<Record<string, LibraryMatch[]>>({})
   const [focusedMatchId, setFocusedMatchId] = useState<Record<string, string | null>>({})
   const [isMatching, setIsMatching] = useState(false)
   const [matchError, setMatchError] = useState('')
 
-  // Audio playback for match previews
   const audioRef = useRef<HTMLAudioElement | null>(null)
   const [playingMatchId, setPlayingMatchId] = useState<string | null>(null)
   const playEndTimerRef = useRef<number | null>(null)
+
+  const initials = userName
+    ? userName.split(/\s+/).map((w) => w[0]).join('').toUpperCase().slice(0, 2)
+    : 'U'
 
   const stopMatchPlayback = useCallback(() => {
     if (audioRef.current) {
@@ -82,7 +166,6 @@ export function TrackReplacement() {
     audio.onended = () => stopMatchPlayback()
   }, [playingMatchId, stopMatchPlayback])
 
-  // Cleanup audio on unmount
   useEffect(() => {
     return () => {
       if (audioRef.current) {
@@ -95,7 +178,6 @@ export function TrackReplacement() {
     }
   }, [])
 
-  // Load library info on mount
   useEffect(() => {
     let alive = true
     const loadInfo = async () => {
@@ -114,7 +196,6 @@ export function TrackReplacement() {
     return () => { alive = false }
   }, [])
 
-  // Keep selected cue in sync with active cue
   useEffect(() => {
     if (activeCueId) {
       setSelectedCueId(activeCueId)
@@ -129,9 +210,7 @@ export function TrackReplacement() {
       const info = await api.getLibraryInfo()
       setIndexAvailable(info.exists)
       setIndexInfo(info.exists ? { tracks: info.tracks, windows: info.windows } : null)
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   }, [])
 
   const handleMatch = async () => {
@@ -216,271 +295,493 @@ export function TrackReplacement() {
     return bpm % 1 === 0 ? String(Math.round(bpm)) : bpm.toFixed(1)
   }
 
+  const cuesSorted = useMemo(
+    () => [...(project?.cues ?? [])].sort((a, b) => a.start - b.start),
+    [project]
+  )
+
+  const matchedCount = project?.cues.filter((c) => c.project_context?.status === 'matched').length ?? 0
+
   return (
-    <div className="space-y-4">
-      {/* Header with title and tabs */}
-      <div className="glass px-6 py-4 rounded-2xl space-y-3">
-        <div className="flex items-center justify-between">
-          <Button variant="outline" size="sm" onClick={() => setCurrentPage('analysis')} className="glass-lighter border-primary/20">
-            ← Back
-          </Button>
-          <Button variant="outline" size="sm" onClick={reset} className="glass-lighter border-primary/20">
-            New Import
-          </Button>
-        </div>
-        <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <h2 className="text-2xl font-medium font-display">Track Replacement</h2>
-            {project && (
-              <span className="text-sm text-foreground-muted">
-                {fileName ?? 'Analysis'} · {cueCount} cues
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            {/* Library summary */}
-            {indexAvailable && indexInfo && (
-              <span className="text-xs text-foreground-muted mr-3">
-                {indexInfo.tracks} tracks · {indexInfo.windows} windows
-              </span>
-            )}
-            {!indexAvailable && (
-              <span className="text-xs text-foreground-muted mr-3">No library index</span>
-            )}
-            {/* Tab buttons */}
-            <button
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === 'match'
-                  ? 'bg-primary/20 text-primary'
-                  : 'text-foreground-muted hover:text-foreground hover:bg-primary/5'
-              }`}
-              onClick={() => setActiveTab('match')}
-            >
-              Match
-            </button>
-            <button
-              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === 'library'
-                  ? 'bg-primary/20 text-primary'
-                  : 'text-foreground-muted hover:text-foreground hover:bg-primary/5'
-              }`}
-              onClick={() => setActiveTab('library')}
-            >
-              Library
-            </button>
+    <div style={{
+      display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden',
+      backgroundColor: CANVAS, color: '#000000',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+    }}>
+      {/* ── HEADER ── */}
+      <header style={{
+        height: 64, flexShrink: 0, backgroundColor: '#fff', borderBottom: '1px solid rgba(0,0,0,0.08)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px',
+        position: 'relative', zIndex: 50,
+      }}>
+        {/* Left */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, width: '33%' }}>
+          <button
+            onClick={() => setCurrentPage('analysis')}
+            style={{
+              width: 40, height: 40, borderRadius: '50%', backgroundColor: '#fff',
+              border: '1px solid rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = '#F9F9F9' }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = '#fff' }}
+          >
+            <ArrowLeftIcon size={20} />
+          </button>
+          <div>
+            <div style={{ ...titleHeavy, fontSize: 16 }}>Find Matches</div>
+            <div style={{ fontSize: 11, color: TEXT_SUB, fontWeight: 500 }}>
+              {fileName ?? 'Analysis'} · {cueCount} cues
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Match tab content */}
-      {activeTab === 'match' && (
-        <>
-          <div className="glass-glow rounded-2xl overflow-hidden p-1">
-            <WaveformViewer />
+        {/* Center — tabs */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, backgroundColor: BENTO, borderRadius: 999, padding: 3 }}>
+          <button
+            onClick={() => setActiveTab('match')}
+            style={{
+              ...pillBtn, padding: '6px 18px', fontSize: 12,
+              backgroundColor: activeTab === 'match' ? '#000' : 'transparent',
+              color: activeTab === 'match' ? '#fff' : TEXT_SUB,
+            }}
+          >
+            <SearchIcon size={14} />
+            Match
+          </button>
+          <button
+            onClick={() => setActiveTab('library')}
+            style={{
+              ...pillBtn, padding: '6px 18px', fontSize: 12,
+              backgroundColor: activeTab === 'library' ? '#000' : 'transparent',
+              color: activeTab === 'library' ? '#fff' : TEXT_SUB,
+            }}
+          >
+            <LibraryIcon size={14} />
+            Library
+          </button>
+        </div>
+
+        {/* Right */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, width: '33%' }}>
+          {indexAvailable && indexInfo && (
+            <span style={{ fontSize: 11, color: TEXT_SUB, fontWeight: 600 }}>
+              {indexInfo.tracks} tracks · {indexInfo.windows} windows
+            </span>
+          )}
+          {!indexAvailable && (
+            <span style={{ fontSize: 11, color: '#B44', fontWeight: 600 }}>No library index</span>
+          )}
+          <div style={{
+            width: 40, height: 40, borderRadius: '50%', backgroundColor: '#000', color: '#fff',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14,
+            cursor: 'pointer',
+          }}>
+            {initials}
           </div>
+        </div>
+      </header>
 
-          <div className="grid grid-cols-1 xl:grid-cols-[45%_1fr_1fr] gap-6 items-start">
-            <div className="glass p-6 rounded-2xl space-y-4">
-              <div className="flex items-center justify-between">
-                <h3 className="text-lg font-medium font-display">Cues</h3>
-                <p className="text-sm text-foreground-muted">Click a cue card to set active cue.</p>
-              </div>
-              <div className="grid gap-4">
-                {[...(project?.cues ?? [])].sort((a, b) => a.start - b.start).map((cue) => {
-                  const segIndex = segments.findIndex(([s, e]) =>
-                    Math.abs(s - cue.start) < 0.5 && Math.abs(e - cue.end) < 0.5
-                  )
-                  return <CueCard key={cue.id} cue={cue} index={segIndex >= 0 ? segIndex : 0} />
-                })}
-              </div>
+      {/* ── MAIN CONTENT ── */}
+      <main style={{ flex: 1, overflow: 'auto', padding: '24px 32px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+        {activeTab === 'match' && (
+          <>
+            {/* Waveform */}
+            <div style={{ backgroundColor: BENTO, borderRadius: 28, padding: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+              <WaveformViewer />
             </div>
 
-            <div className="glass p-6 rounded-2xl space-y-3">
-              <div>
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <h3 className="text-lg font-medium font-display mb-1">Matches</h3>
-                    <p className="text-sm text-foreground-muted">
-                      {selectedCue && selectedCueIndex >= 0
-                        ? `Cue ${selectedCueIndex + 1} · ${selectedCue.start_tc}–${selectedCue.end_tc}`
-                        : 'Select a cue to match'}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    className="btn-primary px-4"
-                    onClick={handleMatch}
-                    disabled={!indexAvailable || !sessionId || !selectedCueId || isMatching || buildStatus === 'running'}
-                  >
-                    {isMatching ? 'Matching…' : 'Find Matches'}
-                  </Button>
+            {/* Three-column grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20, alignItems: 'start' }}>
+
+              {/* ── CUES column ── */}
+              <div style={{ backgroundColor: BENTO, borderRadius: 28, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <span style={{ ...titleHeavy, fontSize: 14 }}>Cues</span>
+                  <span style={{ ...labelBold, fontSize: 9 }}>Click to select</span>
                 </div>
-              </div>
-              {matchError && <p className="text-xs text-red-400">{matchError}</p>}
-              {matches.length === 0 ? (
-                <p className="text-sm text-foreground-muted">No matches yet.</p>
-              ) : (
-                <div className="space-y-2">
-                  {matches.map((match, idx) => {
-                    const matchFileName = match.track_path.replace(/\\/g, '/').split('/').pop()
-                    const isFocused = selectedCueId ? focusedMatchId[selectedCueId] === match.window_id : false
-                    const applied = selectedCue?.project_context?.replacement
-                    const isApplied = !!applied &&
-                      applied.track_path === match.track_path &&
-                      Math.abs(applied.start - match.start) < 0.01 &&
-                      Math.abs(applied.end - match.end) < 0.01
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {cuesSorted.map((cue, idx) => {
+                    const isSelected = cue.id === selectedCueId
+                    const isMatched = cue.project_context?.status === 'matched'
+                    const dur = cue.end - cue.start
+                    const mm = String(Math.floor(dur / 60)).padStart(2, '0')
+                    const ss = String(Math.floor(dur % 60)).padStart(2, '0')
+
                     return (
                       <div
-                        key={match.window_id}
-                        className={`border rounded-lg px-3 py-2 text-xs ${isFocused ? 'border-primary/60 bg-primary/10' : 'border-primary/15'}`}
-                        onClick={() => selectedCueId && setFocusedMatchId((prev) => ({ ...prev, [selectedCueId]: match.window_id }))}
+                        key={cue.id}
+                        onClick={() => { setSelectedCueId(cue.id); setActiveCueId(cue.id) }}
+                        style={{
+                          backgroundColor: isSelected ? '#fff' : LIST_BG,
+                          borderRadius: 16, padding: '14px 16px', cursor: 'pointer',
+                          border: isSelected ? '2px solid #000' : '2px solid transparent',
+                          transition: 'all 0.15s ease',
+                        }}
+                        onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = '#fff' }}
+                        onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.backgroundColor = LIST_BG }}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="font-medium">#{idx + 1} {matchFileName}</span>
-                          <span className="text-foreground-muted">{match.score.toFixed(3)}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                              width: 28, height: 28, borderRadius: '50%',
+                              backgroundColor: isMatched ? '#22C55E' : '#000', color: '#fff',
+                              fontSize: 11, fontWeight: 800,
+                            }}>
+                              {isMatched ? <CheckIcon size={14} /> : `#${idx + 1}`}
+                            </span>
+                            <span style={{ fontSize: 12, fontWeight: 600, fontFamily: 'SF Mono, monospace', color: TEXT_SUB }}>
+                              {secondsToTimecode(cue.start, framerate, startTimecode)} – {secondsToTimecode(cue.end, framerate, startTimecode)}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: 11, fontWeight: 600, color: TEXT_SUB }}>{mm}:{ss}</span>
                         </div>
-                        <div className="text-foreground-muted">
-                          {match.start.toFixed(1)}s – {match.end.toFixed(1)}s · window {match.window_size}s
+
+                        {/* Quick info row */}
+                        <div style={{ display: 'flex', gap: 12, fontSize: 11, fontWeight: 600, color: TEXT_SUB }}>
+                          <span>BPM {formatBpm(cue.musical_profile.bpm)}</span>
+                          <span>{cue.musical_profile.key ?? '—'}</span>
                         </div>
-                        {match.reasons && match.reasons.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {match.reasons.map((reason) => (
-                              <span
-                                key={`${match.window_id}-${reason}`}
-                                className="text-[10px] px-2 py-0.5 rounded-full bg-primary/15 text-primary"
-                              >
-                                {reason}
-                              </span>
+
+                        {/* Tags */}
+                        {cue.musical_profile.curated && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                            {(cue.musical_profile.curated.genres ?? []).slice(0, 2).map((g) => (
+                              <span key={g} style={{
+                                display: 'inline-block', padding: '2px 8px', borderRadius: 999,
+                                backgroundColor: '#000', color: '#fff', fontSize: 9, fontWeight: 700,
+                                textTransform: 'uppercase', letterSpacing: '0.05em',
+                              }}>{g}</span>
+                            ))}
+                            {(cue.musical_profile.curated.style ?? []).slice(0, 2).map((s) => (
+                              <span key={s} style={{
+                                display: 'inline-block', padding: '2px 8px', borderRadius: 999,
+                                backgroundColor: 'transparent', color: '#000', fontSize: 9, fontWeight: 700,
+                                textTransform: 'uppercase', letterSpacing: '0.05em',
+                                border: '1px solid rgba(0,0,0,0.2)',
+                              }}>{s}</span>
                             ))}
                           </div>
                         )}
-                        <div className="mt-2 flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="glass-lighter border-primary/20"
-                            onClick={(e) => { e.stopPropagation(); playMatch(match) }}
-                          >
-                            {playingMatchId === match.window_id ? 'Stop' : 'Play'}
-                          </Button>
-                          {isApplied ? (
-                            <Button size="sm" variant="outline" className="glass-lighter border-white/20 text-foreground-muted" onClick={(e) => { e.stopPropagation(); undoMatch() }}>
-                              Undo
-                            </Button>
-                          ) : (
-                            <Button size="sm" variant="outline" className="glass-lighter border-primary/20" onClick={() => applyMatch(match)}>
-                              Use This
-                            </Button>
-                          )}
-                          {isApplied && (
-                            <span className="text-[10px] uppercase tracking-wide text-primary">Matched</span>
-                          )}
-                        </div>
+
+                        {isMatched && (
+                          <div style={{ marginTop: 6, fontSize: 10, fontWeight: 700, color: '#22C55E', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                            Matched
+                          </div>
+                        )}
                       </div>
                     )
                   })}
                 </div>
-              )}
-            </div>
+              </div>
 
-            <div className="space-y-4">
-              <div className="glass p-6 rounded-2xl space-y-4">
-                <div>
-                  <h3 className="text-lg font-medium font-display mb-2">Details</h3>
-                  <p className="text-sm text-foreground-muted">
-                    Compare the selected cue and the chosen match.
-                  </p>
+              {/* ── MATCHES column ── */}
+              <div style={{ backgroundColor: BENTO, borderRadius: 28, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <span style={{ ...titleHeavy, fontSize: 14 }}>Matches</span>
+                  <button
+                    onClick={handleMatch}
+                    disabled={!indexAvailable || !sessionId || !selectedCueId || isMatching || buildStatus === 'running'}
+                    style={{
+                      ...pillBtn, padding: '6px 16px', fontSize: 12,
+                      backgroundColor: ACCENT, color: '#000',
+                      opacity: (!indexAvailable || !sessionId || !selectedCueId || isMatching) ? 0.4 : 1,
+                    }}
+                  >
+                    <SearchIcon size={13} />
+                    {isMatching ? 'Matching...' : 'Find'}
+                  </button>
                 </div>
-                <div className="space-y-4 text-sm">
-                  <div>
-                    <div className="text-foreground-muted uppercase tracking-wide text-xs mb-2">Cue</div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1">
-                      <span>Length: {selectedCue ? formatSeconds(selectedCue.end - selectedCue.start) : '—'}</span>
-                      <span>BPM: {formatBpm(selectedCue?.musical_profile.bpm)}</span>
-                      <span>Key: {selectedCue?.musical_profile.key ?? '—'}</span>
+
+                <div style={{ fontSize: 11, color: TEXT_SUB, fontWeight: 500, marginBottom: 16 }}>
+                  {selectedCue && selectedCueIndex >= 0
+                    ? `Cue ${selectedCueIndex + 1} · ${secondsToTimecode(selectedCue.start, framerate, startTimecode)}–${secondsToTimecode(selectedCue.end, framerate, startTimecode)}`
+                    : 'Select a cue to match'}
+                </div>
+
+                {matchError && (
+                  <div style={{ backgroundColor: '#FEE2E2', color: '#991B1B', borderRadius: 12, padding: '8px 12px', fontSize: 12, fontWeight: 600, marginBottom: 12 }}>
+                    {matchError}
+                  </div>
+                )}
+
+                {matches.length === 0 ? (
+                  <div style={{ backgroundColor: LIST_BG, borderRadius: 16, padding: 32, textAlign: 'center' }}>
+                    <div style={{ fontSize: 13, color: TEXT_SUB, fontWeight: 500 }}>
+                      {indexAvailable ? 'No matches yet. Click "Find" to search.' : 'Build a library index first.'}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-foreground-muted uppercase tracking-wide text-xs mb-2">Match</div>
-                    {focusedMatch ? (
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap gap-x-4 gap-y-1">
-                          <span>BPM: {formatBpm(focusedMatch.bpm)}</span>
-                          <span>Key: {focusedMatch.key ?? '—'}</span>
-                          <span>Score: {focusedMatch.score.toFixed(3)}</span>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {matches.map((match, idx) => {
+                      const matchFileName = match.track_path.replace(/\\/g, '/').split('/').pop()
+                      const isFocused = selectedCueId ? focusedMatchId[selectedCueId] === match.window_id : false
+                      const applied = selectedCue?.project_context?.replacement
+                      const isApplied = !!applied &&
+                        applied.track_path === match.track_path &&
+                        Math.abs(applied.start - match.start) < 0.01 &&
+                        Math.abs(applied.end - match.end) < 0.01
+                      const similarityPct = Math.round(match.score * 100)
+
+                      return (
+                        <div
+                          key={match.window_id}
+                          onClick={() => selectedCueId && setFocusedMatchId((prev) => ({ ...prev, [selectedCueId]: match.window_id }))}
+                          style={{
+                            backgroundColor: isFocused ? '#fff' : LIST_BG,
+                            borderRadius: 16, padding: '14px 16px', cursor: 'pointer',
+                            border: isFocused ? '2px solid #000' : '2px solid transparent',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={(e) => { if (!isFocused) e.currentTarget.style.backgroundColor = '#fff' }}
+                          onMouseLeave={(e) => { if (!isFocused) e.currentTarget.style.backgroundColor = LIST_BG }}
+                        >
+                          {/* Top row */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                width: 24, height: 24, borderRadius: '50%', backgroundColor: '#000', color: '#fff',
+                                fontSize: 10, fontWeight: 800,
+                              }}>
+                                {idx + 1}
+                              </span>
+                              <span style={{ fontSize: 13, fontWeight: 700 }}>{matchFileName}</span>
+                            </div>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: similarityPct >= 90 ? '#22C55E' : TEXT_SUB }}>
+                              {similarityPct}%
+                            </span>
+                          </div>
+
+                          {/* Metadata */}
+                          <div style={{ fontSize: 11, color: TEXT_SUB, fontWeight: 500, marginBottom: 8 }}>
+                            {match.start.toFixed(1)}s – {match.end.toFixed(1)}s
+                            {match.segment_type === 'structure' && match.section_index != null && match.total_sections != null
+                              ? ` · section ${match.section_index + 1}/${match.total_sections}`
+                              : ` · window ${match.window_size}s`}
+                          </div>
+
+                          {/* Similarity bar */}
+                          <div style={{ height: 4, backgroundColor: '#D1D1D1', borderRadius: 999, overflow: 'hidden', marginBottom: 8 }}>
+                            <div style={{ height: '100%', width: `${similarityPct}%`, backgroundColor: '#000', borderRadius: 999, transition: 'width 0.3s ease' }} />
+                          </div>
+
+                          {/* Reason tags */}
+                          {match.reasons && match.reasons.length > 0 && (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
+                              {match.reasons.map((reason) => (
+                                <span key={`${match.window_id}-${reason}`} style={{
+                                  display: 'inline-block', padding: '2px 8px', borderRadius: 999,
+                                  backgroundColor: 'transparent', border: '1px solid rgba(0,0,0,0.15)',
+                                  fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em',
+                                  color: TEXT_SUB,
+                                }}>
+                                  {reason}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Actions */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); playMatch(match) }}
+                              style={{
+                                ...pillBtn, padding: '4px 12px', fontSize: 11,
+                                backgroundColor: playingMatchId === match.window_id ? '#000' : '#fff',
+                                color: playingMatchId === match.window_id ? '#fff' : '#000',
+                                border: '1px solid rgba(0,0,0,0.15)',
+                              }}
+                            >
+                              {playingMatchId === match.window_id ? <><StopIcon size={12} /> Stop</> : <><PlayIcon size={12} /> Play</>}
+                            </button>
+                            {isApplied ? (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); undoMatch() }}
+                                style={{ ...pillBtn, padding: '4px 12px', fontSize: 11, backgroundColor: '#fff', color: '#000', border: '1px solid rgba(0,0,0,0.15)' }}
+                              >
+                                <UndoIcon size={12} /> Undo
+                              </button>
+                            ) : (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); applyMatch(match) }}
+                                style={{ ...pillBtn, padding: '4px 12px', fontSize: 11, backgroundColor: '#000', color: '#fff' }}
+                              >
+                                <CheckIcon size={12} /> Use This
+                              </button>
+                            )}
+                            {isApplied && (
+                              <span style={{
+                                display: 'inline-flex', alignItems: 'center', gap: 4,
+                                padding: '2px 10px', borderRadius: 999, backgroundColor: '#22C55E', color: '#fff',
+                                fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em',
+                              }}>
+                                <CheckIcon size={10} /> Matched
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ── DETAILS column ── */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <div style={{ backgroundColor: BENTO, borderRadius: 28, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+                  <span style={{ ...titleHeavy, fontSize: 14, display: 'block', marginBottom: 8 }}>Comparison</span>
+                  <p style={{ fontSize: 11, color: TEXT_SUB, fontWeight: 500, marginBottom: 16 }}>
+                    Selected cue vs. chosen match.
+                  </p>
+
+                  {/* Cue details */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div style={{ ...labelBold, marginBottom: 8 }}>Cue</div>
+                    <div style={{ backgroundColor: LIST_BG, borderRadius: 16, padding: '12px 14px' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 13 }}>
+                        <span><strong>Length</strong> {selectedCue ? formatSeconds(selectedCue.end - selectedCue.start) : '—'}</span>
+                        <span><strong>BPM</strong> {formatBpm(selectedCue?.musical_profile.bpm)}</span>
+                        <span><strong>Key</strong> {selectedCue?.musical_profile.key ?? '—'}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Match details */}
+                  <div>
+                    <div style={{ ...labelBold, marginBottom: 8 }}>Match</div>
+                    {focusedMatch ? (
+                      <div style={{ backgroundColor: LIST_BG, borderRadius: 16, padding: '12px 14px' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 13, marginBottom: 6 }}>
+                          <span><strong>BPM</strong> {formatBpm(focusedMatch.bpm)}</span>
+                          <span><strong>Key</strong> {focusedMatch.key ?? '—'}</span>
+                          <span><strong>Score</strong> {focusedMatch.score.toFixed(3)}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: 12, color: TEXT_SUB }}>
                           <span>Range: {focusedMatch.start.toFixed(1)}s–{focusedMatch.end.toFixed(1)}s</span>
                           <span>Window: {focusedMatch.window_size}s</span>
                         </div>
                         {focusedMatch.genres && focusedMatch.genres.length > 0 && (
-                          <div className="text-foreground-muted">
-                            Genre: {focusedMatch.genres.join(', ')}
+                          <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                            {focusedMatch.genres.map((g) => (
+                              <span key={g} style={{
+                                display: 'inline-block', padding: '2px 8px', borderRadius: 999,
+                                backgroundColor: '#000', color: '#fff', fontSize: 9, fontWeight: 700,
+                                textTransform: 'uppercase', letterSpacing: '0.05em',
+                              }}>{g}</span>
+                            ))}
                           </div>
                         )}
                         {focusedMatch.instruments && focusedMatch.instruments.length > 0 && (
-                          <div className="text-foreground-muted">
-                            Instruments: {focusedMatch.instruments.join(', ')}
+                          <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                            {focusedMatch.instruments.map((i) => (
+                              <span key={i} style={{
+                                display: 'inline-block', padding: '2px 8px', borderRadius: 999,
+                                border: '1px solid rgba(0,0,0,0.15)', fontSize: 9, fontWeight: 600,
+                                textTransform: 'uppercase', letterSpacing: '0.05em', color: TEXT_SUB,
+                              }}>{i}</span>
+                            ))}
                           </div>
                         )}
                       </div>
                     ) : (
-                      <div className="text-foreground-muted">Select a match to see details</div>
+                      <div style={{ backgroundColor: LIST_BG, borderRadius: 16, padding: '20px 14px', textAlign: 'center' }}>
+                        <span style={{ fontSize: 12, color: TEXT_SUB }}>Select a match to compare</span>
+                      </div>
                     )}
                   </div>
+
                   {selectedCue?.project_context?.replacement && (
-                    <div className="text-xs text-foreground-muted">
+                    <div style={{ marginTop: 12, padding: '8px 12px', backgroundColor: '#ECFDF5', borderRadius: 12, fontSize: 11, fontWeight: 600, color: '#065F46' }}>
                       Applied: {selectedCue.project_context.replacement.track_path.split('/').pop()}
                     </div>
                   )}
                 </div>
+
+                {/* Finalize button */}
+                <button
+                  onClick={() => setCurrentPage('rights')}
+                  disabled={matchedCount === 0}
+                  style={{
+                    ...pillBtn, width: '100%', padding: '14px 24px', fontSize: 14,
+                    backgroundColor: matchedCount > 0 ? '#000' : BENTO,
+                    color: matchedCount > 0 ? '#fff' : TEXT_SUB,
+                    opacity: matchedCount === 0 ? 0.5 : 1,
+                  }}
+                >
+                  Set Rights ({matchedCount}/{cueCount} matched)
+                </button>
               </div>
-
-              {/* Finalize button */}
-              <Button
-                className="btn-primary px-6 w-full"
-                onClick={() => setCurrentPage('licensing')}
-                disabled={!project?.cues.some((c) => c.project_context?.status === 'matched')}
-              >
-                Finalize Track Replacement →
-              </Button>
             </div>
-          </div>
-        </>
-      )}
+          </>
+        )}
 
-      {/* Library tab content */}
-      {activeTab === 'library' && (
-        <LibraryManager
-          libraryFiles={libraryFiles}
-          setLibraryFiles={setLibraryFiles}
-          libraryFolderName={libraryFolderName}
-          setLibraryFolderName={setLibraryFolderName}
-          includeMoods={includeMoods}
-          setIncludeMoods={setIncludeMoods}
-          buildJobId={buildJobId}
-          setBuildJobId={setBuildJobId}
-          buildStatus={buildStatus}
-          setBuildStatus={setBuildStatus}
-          buildMessage={buildMessage}
-          setBuildMessage={setBuildMessage}
-          progressPercent={progressPercent}
-          setProgressPercent={setProgressPercent}
-          progressCurrent={progressCurrent}
-          setProgressCurrent={setProgressCurrent}
-          progressTotal={progressTotal}
-          setProgressTotal={setProgressTotal}
-          windowsIndexed={windowsIndexed}
-          setWindowsIndexed={setWindowsIndexed}
-          isBuilding={isBuilding}
-          setIsBuilding={setIsBuilding}
-          isUploading={isUploading}
-          setIsUploading={setIsUploading}
-          indexAvailable={indexAvailable}
-          setIndexAvailable={setIndexAvailable}
-          onBuildComplete={handleBuildComplete}
-        />
-      )}
+        {/* Library tab */}
+        {activeTab === 'library' && (
+          <div style={{ backgroundColor: BENTO, borderRadius: 28, padding: 24, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+            <LibraryManager
+              libraryFiles={libraryFiles}
+              setLibraryFiles={setLibraryFiles}
+              libraryFolderName={libraryFolderName}
+              setLibraryFolderName={setLibraryFolderName}
+              includeMoods={includeMoods}
+              setIncludeMoods={setIncludeMoods}
+              buildJobId={buildJobId}
+              setBuildJobId={setBuildJobId}
+              buildStatus={buildStatus}
+              setBuildStatus={setBuildStatus}
+              buildMessage={buildMessage}
+              setBuildMessage={setBuildMessage}
+              progressPercent={progressPercent}
+              setProgressPercent={setProgressPercent}
+              progressCurrent={progressCurrent}
+              setProgressCurrent={setProgressCurrent}
+              progressTotal={progressTotal}
+              setProgressTotal={setProgressTotal}
+              windowsIndexed={windowsIndexed}
+              setWindowsIndexed={setWindowsIndexed}
+              isBuilding={isBuilding}
+              setIsBuilding={setIsBuilding}
+              isUploading={isUploading}
+              setIsUploading={setIsUploading}
+              indexAvailable={indexAvailable}
+              setIndexAvailable={setIndexAvailable}
+              onBuildComplete={handleBuildComplete}
+              segmentationMode={segmentationMode}
+              setSegmentationMode={setSegmentationMode}
+              minSectionLength={minSectionLength}
+              setMinSectionLength={setMinSectionLength}
+            />
+          </div>
+        )}
+      </main>
+
+      {/* ── FOOTER ── */}
+      <footer style={{
+        height: 64, flexShrink: 0, backgroundColor: '#fff', borderTop: '1px solid rgba(0,0,0,0.08)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px',
+        position: 'relative', zIndex: 50,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: TEXT_SUB }}>
+            {matchedCount} of {cueCount} cues matched
+          </span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={() => setCurrentPage('analysis')} style={{ ...pillBtn, backgroundColor: '#fff', color: '#000', border: '1px solid rgba(0,0,0,0.15)' }}>
+            Back to Analysis
+          </button>
+          <button
+            onClick={() => setCurrentPage('rights')}
+            disabled={matchedCount === 0}
+            style={{ ...pillBtn, backgroundColor: matchedCount > 0 ? ACCENT : BENTO, color: '#000', opacity: matchedCount === 0 ? 0.5 : 1 }}
+          >
+            Set Rights →
+          </button>
+        </div>
+      </footer>
     </div>
   )
 }
