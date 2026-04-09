@@ -67,7 +67,7 @@ def create_cue(
         sorted_items = sorted(items.items(), key=lambda x: x[1], reverse=True)
         return [item[0] for item in sorted_items[:n]]
 
-    curated_instruments = get_top_n(instruments, 8) if instruments else []
+    curated_instruments_yamnet = get_top_n(instruments, 8) if instruments else []
     curated_genres = get_top_n(genres, 3) if genres else []  # Top 3 YAMNet genres
     curated_moods = moods[:2] if moods else []  # Top 2 moods
 
@@ -86,6 +86,15 @@ def create_cue(
             curated_clap["era"] = get_top_n(tags, 1)
         elif category == "function":
             curated_clap["function"] = get_top_n(tags, 1)
+
+    # Merge CLAP ensemble-level instrumentation into curated instruments.
+    # YAMNet detects individual instruments (Piano, Violin) but is weak on
+    # orchestral ensembles. CLAP fills this gap (brass section, string ensemble).
+    clap_instr = curated_clap.get("instrumentation", [])
+    yamnet_set = set(curated_instruments_yamnet)
+    curated_instruments = curated_instruments_yamnet + [
+        tag for tag in clap_instr if tag not in yamnet_set
+    ]
 
     return {
         "id": cue_id,

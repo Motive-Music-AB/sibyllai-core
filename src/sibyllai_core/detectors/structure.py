@@ -1,11 +1,12 @@
 """
-Music change-point detection via spectral novelty function.
+Music structure detection via beat-synchronous self-similarity analysis.
 
-Detects structural boundaries (intro, verse, chorus, build-up, climax, etc.)
-by computing spectral flux from a mel-spectrogram and picking peaks that
-correspond to significant timbral/energy transitions.
+Identifies structural sections (intro, verse, chorus, build-up, climax, etc.)
+by computing a cosine similarity matrix over beat-synchronous MFCC + chroma
+features, then applying a checkerboard kernel to find novelty peaks where
+musical character actually changes.
 
-Fast, no new dependencies: uses librosa + scipy (already installed).
+Uses librosa + scipy + sklearn (already installed).
 """
 from __future__ import annotations
 
@@ -25,88 +26,124 @@ def detect_sections(
     audio: np.ndarray,
     sr: int,
     min_section_length: float = 8.0,
-    sensitivity: float = 1.0,
-    n_mels: int = 128,
     hop_length: int = 512,
-    kernel_size: int = 64,
 ) -> list[Section]:
     """
-    Detect structural sections in audio using spectral novelty + peak picking.
+    Detect structural sections using beat-synchronous self-similarity novelty.
+
+    1. Extract MFCC (timbre) + chroma (harmony) features per frame.
+    2. Beat-synchronize features — averages per beat for a cleaner signal.
+    3. Build a cosine similarity matrix (dense, not sparse recurrence).
+    4. Apply a checkerboard kernel to find novelty peaks — points where
+       the musical character *changes* on either side.
+    5. Pick peaks in the novelty curve as structural boundaries.
+    6. Merge short sections.
+
+    This detects actual structural changes (timbre + harmony shifts)
+    rather than just energy transients.
 
     Args:
         audio: Mono audio signal as numpy array.
         sr: Sample rate.
         min_section_length: Minimum section duration in seconds.
-        sensitivity: Peak threshold multiplier (higher = fewer peaks).
-        n_mels: Number of mel bands for the spectrogram.
-        hop_length: Hop length in samples (~11.6ms at 44.1kHz).
-        kernel_size: Gaussian smoothing kernel width in frames.
+        hop_length: Hop length in samples.
 
     Returns:
         List of Section namedtuples sorted by start time.
     """
     import librosa
-    from scipy.ndimage import gaussian_filter1d
     from scipy.signal import find_peaks
+    from sklearn.metrics.pairwise import cosine_similarity
 
     total_duration = len(audio) / sr
-    if total_duration < min_section_length:
-        return [Section(start=0.0, end=total_duration, duration=total_duration)]
+    if total_duration < min_section_length * 2:
+        return [Section(start=0.0, end=round(total_duration, 3), duration=round(total_duration, 3))]
 
-    # 1. Mel spectrogram
-    S = librosa.feature.melspectrogram(
-        y=audio, sr=sr, n_mels=n_mels, hop_length=hop_length
-    )
-    S_db = librosa.power_to_db(S, ref=np.max)
+    # --- 1. Extract features ---
+    mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13, hop_length=hop_length)
+    chroma = librosa.feature.chroma_cqt(y=audio, sr=sr, hop_length=hop_length)
 
-    # 2. Spectral flux (L2 norm of positive frame-to-frame differences)
-    diff = np.diff(S_db, axis=1)
-    diff = np.maximum(diff, 0)  # only positive changes (onsets)
-    flux = np.linalg.norm(diff, axis=0)
+    # --- 2. Beat-synchronize for cleaner representation ---
+    # Averaging features per beat removes transient noise and aligns
+    # the analysis to the musical pulse.
+    tempo, beats = librosa.beat.beat_track(y=audio, sr=sr, hop_length=hop_length)
+    if len(beats) < 4:
+        return [Section(start=0.0, end=round(total_duration, 3), duration=round(total_duration, 3))]
 
-    if len(flux) < 3:
-        return [Section(start=0.0, end=total_duration, duration=total_duration)]
+    mfcc_sync = librosa.util.sync(mfcc, beats, aggregate=np.median)
+    chroma_sync = librosa.util.sync(chroma, beats, aggregate=np.median)
 
-    # 3. Gaussian smoothing
-    sigma = max(1, kernel_size / 6)
-    flux_smooth = gaussian_filter1d(flux, sigma=sigma)
+    features = np.vstack([
+        librosa.util.normalize(mfcc_sync, axis=1),
+        librosa.util.normalize(chroma_sync, axis=1),
+    ])
 
-    # 4. Normalize to [0, 1]
-    fmax = flux_smooth.max()
-    if fmax > 0:
-        flux_norm = flux_smooth / fmax
-    else:
-        return [Section(start=0.0, end=total_duration, duration=total_duration)]
+    n_beats = features.shape[1]
+    if n_beats < 8:
+        return [Section(start=0.0, end=round(total_duration, 3), duration=round(total_duration, 3))]
 
-    # 5. Adaptive threshold
-    threshold = float(np.mean(flux_norm) + sensitivity * np.std(flux_norm))
-    threshold = min(threshold, 0.95)  # prevent threshold from eliminating everything
+    # --- 3. Cosine similarity matrix ---
+    # Dense matrix showing how similar every beat is to every other beat.
+    # Unlike the sparse recurrence matrix, this preserves local structure
+    # needed for the checkerboard kernel.
+    sim = cosine_similarity(features.T)
 
-    # 6. Peak picking
-    min_frames = int(min_section_length * sr / hop_length)
+    # --- 4. Checkerboard novelty on similarity matrix ---
+    # At each beat position, compare self-similarity BEFORE vs AFTER.
+    # High novelty = the musical character changes here.
+    half_k = max(4, n_beats // 8)
+    novelty = np.zeros(n_beats)
+
+    for i in range(half_k, n_beats - half_k):
+        before = sim[i - half_k:i, i - half_k:i]
+        after = sim[i:i + half_k, i:i + half_k]
+        cross = sim[i - half_k:i, i:i + half_k]
+        self_sim = (before.mean() + after.mean()) / 2
+        cross_sim = cross.mean()
+        novelty[i] = max(0, self_sim - cross_sim)
+
+    if novelty.max() == 0:
+        return [Section(start=0.0, end=round(total_duration, 3), duration=round(total_duration, 3))]
+
+    novelty = novelty / novelty.max()
+
+    # --- 5. Peak picking ---
+    # Convert min_section_length to beat frames
+    beat_times = librosa.frames_to_time(beats, sr=sr, hop_length=hop_length)
+    avg_beat_dur = np.median(np.diff(beat_times)) if len(beat_times) > 1 else 0.5
+    min_beat_frames = max(1, int(min_section_length / avg_beat_dur))
+
+    # Threshold: mean + 1.5 std catches only significant structural changes
+    threshold = float(np.mean(novelty) + 1.5 * np.std(novelty))
+    threshold = max(threshold, 0.3)
+    threshold = min(threshold, 0.85)
+
     peaks, _ = find_peaks(
-        flux_norm,
+        novelty,
         height=threshold,
-        distance=min_frames,
-        prominence=0.05,
+        distance=min_beat_frames,
+        prominence=0.15,
     )
 
     if len(peaks) == 0:
-        return [Section(start=0.0, end=total_duration, duration=total_duration)]
+        return [Section(start=0.0, end=round(total_duration, 3), duration=round(total_duration, 3))]
 
-    # 7. Convert peak frames to time boundaries
-    # The diff operation shifts indices by 1, so peaks correspond to frame (peak+1) in the original spectrogram
-    peak_times = librosa.frames_to_time(peaks + 1, sr=sr, hop_length=hop_length)
+    # --- 6. Convert beat-frame peaks to time boundaries ---
+    peak_times = []
+    for p in peaks:
+        if p < len(beat_times):
+            peak_times.append(float(beat_times[p]))
+        else:
+            peak_times.append(float(librosa.frames_to_time(beats[-1], sr=sr, hop_length=hop_length)))
 
-    # 8. Build sections from boundaries
-    boundaries = [0.0] + list(peak_times) + [total_duration]
+    boundaries = [0.0] + peak_times + [total_duration]
     sections: list[Section] = []
     for i in range(len(boundaries) - 1):
         s = boundaries[i]
         e = boundaries[i + 1]
         sections.append(Section(start=round(s, 3), end=round(e, 3), duration=round(e - s, 3)))
 
-    # 9. Merge short sections into neighbours
+    # --- 7. Merge short sections ---
     sections = _merge_short_sections(sections, min_section_length)
 
     return sections
@@ -130,7 +167,6 @@ def _merge_short_sections(
             if sec.duration < min_length and len(merged) > 1:
                 changed = True
                 if i == 0 and i + 1 < len(merged):
-                    # Merge with next
                     nxt = merged[i + 1]
                     new_merged.append(Section(
                         start=sec.start,
@@ -139,7 +175,6 @@ def _merge_short_sections(
                     ))
                     i += 2
                 elif i == len(merged) - 1 and len(new_merged) > 0:
-                    # Merge with previous (last in new_merged)
                     prev = new_merged.pop()
                     new_merged.append(Section(
                         start=prev.start,
@@ -148,7 +183,6 @@ def _merge_short_sections(
                     ))
                     i += 1
                 elif i > 0 and i + 1 < len(merged):
-                    # Merge with shorter neighbour
                     prev = new_merged[-1] if new_merged else None
                     nxt = merged[i + 1]
                     if prev and prev.duration <= nxt.duration:
@@ -184,17 +218,16 @@ def detect_sections_with_fallback(
     sensitivity: float = 1.0,
 ) -> list[Section]:
     """
-    Detect sections with fallback strategies for edge cases.
+    Detect sections with fallback for edge cases.
 
-    - Over-segmented (>20 sections): retry with higher sensitivity (1.5x).
-    - Under-segmented (1 section on long audio): fallback to agglomerative segmentation.
-    - Final fallback: single section covering full duration.
+    Primary: beat-synchronous cosine similarity novelty.
+    Fallback: agglomerative clustering on stacked MFCC + chroma.
 
     Args:
         audio: Mono audio signal.
         sr: Sample rate.
         min_section_length: Minimum section duration in seconds.
-        sensitivity: Initial peak threshold multiplier.
+        sensitivity: Unused (kept for API compatibility).
 
     Returns:
         List of Section namedtuples.
@@ -205,26 +238,9 @@ def detect_sections_with_fallback(
         sections = detect_sections(
             audio, sr,
             min_section_length=min_section_length,
-            sensitivity=sensitivity,
         )
 
-        # Over-segmented: retry with higher sensitivity
-        if len(sections) > 20:
-            sections = detect_sections(
-                audio, sr,
-                min_section_length=min_section_length,
-                sensitivity=sensitivity * 1.5,
-            )
-
-        # Still over-segmented: bump sensitivity further
-        if len(sections) > 20:
-            sections = detect_sections(
-                audio, sr,
-                min_section_length=min_section_length,
-                sensitivity=sensitivity * 2.0,
-            )
-
-        # Under-segmented on long audio: try agglomerative
+        # If primary method returns only 1 section on long audio, try agglomerative
         if len(sections) <= 1 and total_duration > min_section_length * 3:
             sections = _agglomerative_fallback(audio, sr, min_section_length)
 
@@ -232,7 +248,11 @@ def detect_sections_with_fallback(
 
     except Exception as e:
         print(f"[WARNING] Structure detection failed: {e}")
-        return [Section(start=0.0, end=round(total_duration, 3), duration=round(total_duration, 3))]
+        # Try agglomerative as last resort
+        try:
+            return _agglomerative_fallback(audio, sr, min_section_length)
+        except Exception:
+            return [Section(start=0.0, end=round(total_duration, 3), duration=round(total_duration, 3))]
 
 
 def _agglomerative_fallback(
@@ -241,19 +261,25 @@ def _agglomerative_fallback(
     min_section_length: float,
 ) -> list[Section]:
     """
-    Fallback segmentation using librosa's agglomerative clustering on MFCCs.
+    Fallback segmentation using agglomerative clustering on MFCC + chroma.
 
-    Used when spectral novelty finds no boundaries (e.g., very smooth audio).
+    Uses feature stacking for richer representation than MFCC alone.
     """
     import librosa
 
     total_duration = len(audio) / sr
     max_sections = max(2, int(total_duration / min_section_length))
-    k = min(max_sections, 10)
+    k = min(max_sections, 8)
 
     try:
         mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=13)
-        bound_frames = librosa.segment.agglomerative(mfcc, k=k)
+        chroma = librosa.feature.chroma_cqt(y=audio, sr=sr)
+        features = np.vstack([
+            librosa.util.normalize(mfcc, axis=1),
+            librosa.util.normalize(chroma, axis=1),
+        ])
+
+        bound_frames = librosa.segment.agglomerative(features, k=k)
         bound_times = librosa.frames_to_time(bound_frames, sr=sr)
 
         boundaries = sorted(set([0.0] + list(bound_times) + [total_duration]))

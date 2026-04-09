@@ -13,11 +13,11 @@ const ZOOM_LEVELS = [0, 10, 25, 50, 100, 200]
 function getEnergyOverlayColor(label: string): string {
   const lower = label.toLowerCase()
   if (lower.includes('climactic') || lower.includes('aggressive') || lower.includes('high energy')) {
-    return 'rgba(20, 20, 20, 0.32)'
+    return 'rgba(243, 89, 107, 0.25)'
   }
-  if (lower.includes('building tension')) return 'rgba(20, 20, 20, 0.24)'
-  if (lower.includes('gentle') || lower.includes('low energy')) return 'rgba(20, 20, 20, 0.14)'
-  return 'rgba(20, 20, 20, 0.2)'
+  if (lower.includes('building tension')) return 'rgba(180, 150, 120, 0.20)'
+  if (lower.includes('gentle') || lower.includes('low energy')) return 'rgba(99, 183, 255, 0.15)'
+  return 'rgba(255, 255, 255, 0.08)'
 }
 
 interface WaveformViewerProps {
@@ -105,9 +105,9 @@ export function WaveformViewer({
     // Create WaveSurfer instance
     const ws = WaveSurfer.create({
       container: waveformRef.current,
-      waveColor: '#333',
-      progressColor: '#555',
-      cursorColor: '#080808',
+      waveColor: 'rgba(233, 241, 255, 0.55)',
+      progressColor: 'rgba(99, 183, 255, 0.7)',
+      cursorColor: '#ffffff',
       barWidth: 3,
       barGap: 1,
       barRadius: 2,
@@ -315,8 +315,12 @@ export function WaveformViewer({
       return
     }
 
-    // Seek to cue start and play
-    ws.setTime(activeCue.start)
+    // If playhead is already inside the cue, resume from there.
+    // Otherwise jump to the cue start.
+    const now = ws.getCurrentTime()
+    if (now < activeCue.start || now >= activeCue.end) {
+      ws.setTime(activeCue.start)
+    }
     ws.play()
     setPlayingCueId(activeCueId)
 
@@ -426,15 +430,15 @@ export function WaveformViewer({
       // Determine color based on state (monochrome brutalist)
       let color: string
       if (project && !cue) {
-        color = 'rgba(200, 200, 200, 0.4)' // Faded for unanalyzed segments
+        color = 'rgba(255, 255, 255, 0.06)' // Faded for unanalyzed segments
       } else if (isActive) {
-        color = 'rgba(8, 8, 8, 0.2)' // Dark overlay for active cue
+        color = 'rgba(99, 183, 255, 0.15)' // Blue overlay for active cue
       } else if (project && cue) {
-        color = 'rgba(8, 8, 8, 0.06)' // Subtle tint for analyzed cues
+        color = 'rgba(255, 255, 255, 0.04)' // Subtle tint for analyzed cues
       } else if (selected) {
-        color = 'rgba(8, 8, 8, 0.12)' // Medium overlay for selected
+        color = 'rgba(255, 255, 255, 0.1)' // Medium overlay for selected
       } else {
-        color = 'rgba(200, 200, 200, 0.4)' // Faded for unselected
+        color = 'rgba(255, 255, 255, 0.06)' // Faded for unselected
       }
 
       // Enable dragging/resizing only before analysis
@@ -452,8 +456,8 @@ export function WaveformViewer({
       // Add event handlers
       if (region && region.element) {
         // Add visual separation between adjacent cues (border on both sides)
-        region.element.style.borderLeft = '1px solid rgba(8, 8, 8, 0.4)'
-        region.element.style.borderRight = '1px solid rgba(8, 8, 8, 0.4)'
+        region.element.style.borderLeft = '1px solid rgba(255, 255, 255, 0.2)'
+        region.element.style.borderRight = '1px solid rgba(255, 255, 255, 0.2)'
         region.element.style.boxSizing = 'border-box'
 
         // Click handler - use ref to get latest callback
@@ -599,7 +603,7 @@ export function WaveformViewer({
 
       // Enable drag selection for creating new regions
       regionsRef.current.enableDragSelection({
-        color: 'rgba(8, 8, 8, 0.1)',
+        color: 'rgba(255, 255, 255, 0.08)',
       })
 
       // Listen for user-created regions (drag-to-create)
@@ -802,7 +806,7 @@ export function WaveformViewer({
       <div className="wv-body">
           {/* Nav toolbar — only shown on sub-pages, not inside pipeline */}
           {currentPage !== 'pipeline' && (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid #080808' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
               <div>
                 {currentPage === 'analysis' && !project && (
                   <button className="btn-pill" style={{ height: 28, fontSize: '0.65rem' }} onClick={reset}>
@@ -827,7 +831,7 @@ export function WaveformViewer({
           )}
           <div
             className="overflow-x-auto relative waveform-scroll-container"
-            style={{ background: '#E8E8E8' }}
+            style={{ background: '#0a0f1a' }}
           >
             {/* Wrapper that contains both ruler and waveform - scrolls as one unit */}
             <div
@@ -859,8 +863,8 @@ export function WaveformViewer({
                     ref={rulerRef}
                     className="relative h-8"
                     style={{
-                      background: '#D8D8D8',
-                      borderBottom: '1px solid #080808',
+                      background: 'rgba(255,255,255,0.03)',
+                      borderBottom: '1px solid rgba(255,255,255,0.08)',
                       width: zoom === 0 ? '100%' : `${displayWidth}px`,
                       minWidth: zoom === 0 ? '100%' : `${displayWidth}px`,
                     }}
@@ -877,7 +881,7 @@ export function WaveformViewer({
                           style={{
                             width: '1px',
                             height: tick.isMajor ? '12px' : '6px',
-                            background: 'rgba(8,8,8,0.4)',
+                            background: 'rgba(255,255,255,0.25)',
                           }}
                         />
                         {/* Timecode label (only on major ticks) */}
@@ -887,8 +891,8 @@ export function WaveformViewer({
                               position: 'absolute',
                               top: '12px',
                               fontSize: '0.65rem',
-                              fontFamily: 'var(--pl-font-mono)',
-                              color: 'rgba(8,8,8,0.5)',
+                              fontFamily: '"IBM Plex Mono", monospace',
+                              color: 'rgba(255,255,255,0.5)',
                               whiteSpace: 'nowrap',
                               transform: index === 0 ? 'none' : 'translateX(-50%)',
                             }}
@@ -921,8 +925,8 @@ export function WaveformViewer({
                   <div
                     className="relative h-7 pointer-events-none"
                     style={{
-                      background: '#E0E0E0',
-                      borderBottom: '1px solid rgba(8,8,8,0.15)',
+                      background: 'rgba(255,255,255,0.02)',
+                      borderBottom: '1px solid rgba(255,255,255,0.06)',
                       width: zoom === 0 ? '100%' : `${displayW}px`,
                       minWidth: zoom === 0 ? '100%' : `${displayW}px`,
                     }}
@@ -946,7 +950,7 @@ export function WaveformViewer({
                             className="absolute top-0 h-full flex items-center justify-center"
                             style={{ left: `${leftPx}px`, width: `${widthPx}px` }}
                           >
-                            <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: 'var(--pl-font-mono)', color: 'rgba(8,8,8,0.5)', userSelect: 'none' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 700, fontFamily: '"IBM Plex Mono", monospace', color: 'rgba(255,255,255,0.6)', userSelect: 'none' }}>
                               #{cueIndex + 1}
                             </span>
                           </div>
@@ -964,7 +968,7 @@ export function WaveformViewer({
                             <button
                               className="pointer-events-auto flex items-center justify-center w-5 h-5 rounded border-2 transition-all text-[13px] font-semibold leading-5"
                               style={{
-                                borderColor: selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(200, 200, 200, 0.5)',
+                                borderColor: selected ? 'rgba(34, 197, 94, 0.9)' : 'rgba(255, 255, 255, 0.3)',
                                 backgroundColor: selected ? 'rgba(34, 197, 94, 0.9)' : 'transparent',
                                 color: 'white',
                                 cursor: 'pointer',
@@ -986,70 +990,124 @@ export function WaveformViewer({
                 )
               })()}
 
-              {/* Active cue section overlays on waveform timeline */}
-              {isReady && hasLinkedSections && (() => {
-                const duration = wavesurferRef.current?.getDuration() || 1
-                let displayW = waveformWidth
-                if (!displayW || displayW === 0) {
-                  const wrapper = wavesurferRef.current?.getWrapper()
-                  if (zoom === 0) {
-                    const container = waveformRef.current?.parentElement
-                    displayW = container?.clientWidth || wrapper?.clientWidth || 0
-                  } else {
-                    displayW = wrapper?.scrollWidth || wrapper?.clientWidth || 0
+              {/* Waveform + section overlays wrapper — relative so overlay aligns exactly.
+                  Width matches the waveform: 100% when fit, fixed pixel width when zoomed. */}
+              <div
+                style={{
+                  position: 'relative',
+                  width: zoom === 0 ? '100%' : `${waveformWidth}px`,
+                  minWidth: zoom === 0 ? '100%' : `${waveformWidth}px`,
+                }}
+              >
+                <div ref={waveformRef} className="w-full" />
+
+                {/* Active cue section overlays — positioned over the waveform */}
+                {isReady && hasLinkedSections && (() => {
+                  const duration = wavesurferRef.current?.getDuration() || 1
+                  let displayW = waveformWidth
+                  if (!displayW || displayW === 0) {
+                    const wrapper = wavesurferRef.current?.getWrapper()
+                    if (zoom === 0) {
+                      // Walk up to the scroll container to get the real viewport width
+                      const container = waveformRef.current?.closest('.waveform-scroll-container') as HTMLElement | null
+                      displayW = container?.clientWidth || wrapper?.clientWidth || 0
+                    } else {
+                      displayW = wrapper?.scrollWidth || wrapper?.clientWidth || 0
+                    }
                   }
-                }
 
-                const cueDuration = Math.max(0.001, (activeCue?.end ?? 0) - (activeCue?.start ?? 0))
-                const playheadSectionIdx = activeSections.findIndex((sec) => {
-                  const secStart = (activeCue?.start ?? 0) + sec.start_relative
-                  const secEnd = (activeCue?.start ?? 0) + sec.end_relative
-                  return currentTime >= secStart && currentTime <= secEnd
-                })
-                const effectiveIdx = linkedSectionIndex ?? (playheadSectionIdx >= 0 ? playheadSectionIdx : null)
+                  const playheadSectionIdx = activeSections.findIndex((sec) => {
+                    const secStart = (activeCue?.start ?? 0) + sec.start_relative
+                    const secEnd = (activeCue?.start ?? 0) + sec.end_relative
+                    return currentTime >= secStart && currentTime <= secEnd
+                  })
+                  const effectiveIdx = linkedSectionIndex ?? (playheadSectionIdx >= 0 ? playheadSectionIdx : null)
 
-                return (
-                  <div
-                    className="absolute left-0 top-[36px] h-[180px] pointer-events-none"
-                    style={{
-                      width: zoom === 0 ? '100%' : `${displayW}px`,
-                      minWidth: zoom === 0 ? '100%' : `${displayW}px`,
-                      zIndex: 4,
-                    }}
-                  >
-                    {activeSections.map((sec, idx) => {
-                      const secStart = (activeCue?.start ?? 0) + sec.start_relative
-                      const secEnd = (activeCue?.start ?? 0) + sec.end_relative
-                      const leftPx = (secStart / duration) * displayW
-                      const widthPx = Math.max(4, ((secEnd - secStart) / duration) * displayW)
-                      const isActiveSection = effectiveIdx === idx
-                      return (
-                        <div
-                          key={idx}
-                          className="absolute top-0 h-full pointer-events-auto"
-                          onMouseEnter={() => onLinkedSectionHover?.(idx)}
-                          onMouseLeave={() => onLinkedSectionHover?.(null)}
-                          onClick={() => onLinkedSectionSelect?.(idx)}
-                          title={`Section ${idx + 1}: ${sec.energy_label}${sec.bpm ? ` · ${Math.round(sec.bpm)} BPM` : ''}${sec.key ? ` · ${sec.key}` : ''}`}
-                          style={{
-                            left: `${leftPx}px`,
-                            width: `${widthPx}px`,
-                            background: getEnergyOverlayColor(sec.energy_label),
-                            borderLeft: '1px solid rgba(8,8,8,0.35)',
-                            borderRight: '1px solid rgba(8,8,8,0.35)',
-                            opacity: effectiveIdx !== null && !isActiveSection ? 0.4 : 1,
-                            boxShadow: isActiveSection ? 'inset 0 0 0 2px rgba(255,255,255,0.75)' : 'none',
-                            cursor: 'pointer',
-                            transition: 'opacity 0.12s ease, box-shadow 0.12s ease',
-                          }}
-                        />
-                      )
-                    })}
-                  </div>
-                )
-              })()}
-
-              <div ref={waveformRef} className="w-full" />
+                  return (
+                    <div
+                      className="pointer-events-none"
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: zoom === 0 ? '100%' : `${displayW}px`,
+                        minWidth: zoom === 0 ? '100%' : `${displayW}px`,
+                        zIndex: 4,
+                      }}
+                    >
+                      {activeSections.map((sec, idx) => {
+                        const secStart = (activeCue?.start ?? 0) + sec.start_relative
+                        const secEnd = (activeCue?.start ?? 0) + sec.end_relative
+                        const leftPx = (secStart / duration) * displayW
+                        const widthPx = Math.max(4, ((secEnd - secStart) / duration) * displayW)
+                        const isActiveSection = effectiveIdx === idx
+                        const isWide = widthPx > 80
+                        return (
+                          <div
+                            key={idx}
+                            className="pointer-events-auto"
+                            onMouseEnter={() => onLinkedSectionHover?.(idx)}
+                            onMouseLeave={() => onLinkedSectionHover?.(null)}
+                            onClick={() => onLinkedSectionSelect?.(idx)}
+                            style={{
+                              position: 'absolute',
+                              left: `${leftPx}px`,
+                              top: 0,
+                              bottom: 0,
+                              width: `${widthPx}px`,
+                              background: getEnergyOverlayColor(sec.energy_label),
+                              borderRight: '1px solid rgba(255,255,255,0.14)',
+                              opacity: effectiveIdx !== null && !isActiveSection ? 0.33 : 1,
+                              outline: isActiveSection ? '2px solid rgba(248, 251, 255, 0.7)' : '2px solid transparent',
+                              outlineOffset: '-2px',
+                              cursor: 'pointer',
+                              transition: 'opacity 0.14s ease, outline-color 0.14s ease',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'space-between',
+                              padding: isWide ? '8px' : '4px',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {/* Pill label — top-left */}
+                            {isWide && (
+                              <span style={{
+                                alignSelf: 'flex-start',
+                                padding: '2px 8px',
+                                borderRadius: 999,
+                                fontSize: 11,
+                                fontWeight: 700,
+                                background: 'rgba(0, 0, 0, 0.38)',
+                                border: '1px solid rgba(255, 255, 255, 0.18)',
+                                color: '#edf2ff',
+                                whiteSpace: 'nowrap',
+                                lineHeight: 1.3,
+                                fontFamily: 'Manrope, sans-serif',
+                              }}>
+                                #{idx + 1} {sec.energy_label}
+                              </span>
+                            )}
+                            {/* BPM / Key — bottom-left */}
+                            {isWide && (
+                              <span style={{
+                                fontSize: 11,
+                                fontFamily: '"IBM Plex Mono", monospace',
+                                color: '#edf2ff',
+                                textShadow: '0 1px 2px rgba(0, 0, 0, 0.5)',
+                                whiteSpace: 'nowrap',
+                                lineHeight: 1.3,
+                              }}>
+                                {sec.bpm ? Math.round(sec.bpm) : '—'} BPM · {sec.key || '—'}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+              </div>
 
               {/* Dragging timecode tooltips - bottom-right corner near mouse cursor */}
               {draggingTimecodes && draggingTimecodes.mouseX !== undefined && draggingTimecodes.mouseY !== undefined && (
@@ -1059,14 +1117,15 @@ export function WaveformViewer({
                     left: `${draggingTimecodes.mouseX}px`,
                     top: `${draggingTimecodes.mouseY}px`,
                     transform: 'translate(calc(-100% - 12px), calc(-100% - 12px))',
-                    background: '#080808',
-                    color: '#F0F0F0',
+                    background: 'rgba(99, 183, 255, 0.2)',
+                    color: '#edf2ff',
+                    border: '1px solid rgba(99, 183, 255, 0.3)',
                     borderRadius: '4px',
                     boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
                     padding: '6px 10px',
                     pointerEvents: 'none' as const,
                     fontSize: '0.8rem',
-                    fontFamily: 'var(--pl-font-mono)',
+                    fontFamily: '"IBM Plex Mono", monospace',
                     whiteSpace: 'nowrap',
                     zIndex: 9999,
                   }}
@@ -1080,18 +1139,19 @@ export function WaveformViewer({
           </div>
 
           {isReady && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderTop: '1px solid #080808' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', borderTop: '1px solid rgba(255,255,255,0.08)' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 {/* Playhead timecode display */}
                 <div style={{
                   padding: '4px 10px',
-                  border: '1px solid #080808',
+                  border: '1px solid rgba(255,255,255,0.15)',
                   borderRadius: 4,
                   fontSize: '0.8rem',
-                  fontFamily: 'var(--pl-font-mono)',
+                  fontFamily: '"IBM Plex Mono", monospace',
                   minWidth: 120,
                   textAlign: 'center',
-                  background: '#fff',
+                  background: '#121722',
+                  color: '#edf2ff',
                 }}>
                   {currentTimecode || secondsToTimecode(0, framerate, startTimecode)}
                 </div>
@@ -1103,7 +1163,7 @@ export function WaveformViewer({
                       key={i}
                       style={{
                         width: 3,
-                        background: '#080808',
+                        background: 'rgba(99, 183, 255, 0.7)',
                         borderRadius: 1,
                         height: isPlaying ? undefined : '4px',
                         animation: isPlaying ? `soundbar 0.4s ease-in-out ${i * 0.08}s infinite` : 'none',
@@ -1131,12 +1191,12 @@ export function WaveformViewer({
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginLeft: 'auto' }}>
                 {segments.length > 0 && !project && (
-                  <span style={{ fontSize: '0.6rem', fontFamily: 'var(--pl-font-mono)', opacity: 0.5 }}>
+                  <span style={{ fontSize: '0.6rem', fontFamily: '"IBM Plex Mono", monospace', opacity: 0.5 }}>
                     Drag edges • Right-click split/delete
                   </span>
                 )}
                 {project && (
-                  <span style={{ fontSize: '0.6rem', fontFamily: 'var(--pl-font-mono)', opacity: 0.5 }}>
+                  <span style={{ fontSize: '0.6rem', fontFamily: '"IBM Plex Mono", monospace', opacity: 0.5 }}>
                     Click cues to view details
                   </span>
                 )}
@@ -1156,19 +1216,20 @@ export function WaveformViewer({
                   position: 'fixed',
                   left: `${contextMenu.x}px`,
                   top: `${contextMenu.y}px`,
-                  background: '#fff',
-                  border: '1px solid #080808',
+                  background: '#1a2030',
+                  border: '1px solid rgba(255,255,255,0.12)',
                   borderRadius: 6,
-                  boxShadow: '4px 4px 0 rgba(0,0,0,0.1)',
+                  boxShadow: '4px 4px 0 rgba(0,0,0,0.3)',
                   padding: '4px 0',
                   zIndex: 50,
-                  fontFamily: 'var(--pl-font-mono)',
+                  fontFamily: '"IBM Plex Mono", monospace',
+                  color: '#edf2ff',
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 16px', border: 'none', background: 'none', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#F0F0F0')}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 16px', border: 'none', background: 'none', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left', color: '#edf2ff' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
                   onClick={() => handleSplitAtMouse(contextMenu.segmentIndex, contextMenu.splitTime)}
                 >
@@ -1176,8 +1237,8 @@ export function WaveformViewer({
                   <span>Split cue</span>
                 </button>
                 <button
-                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 16px', border: 'none', background: 'none', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left', color: '#c00' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = '#F0F0F0')}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 16px', border: 'none', background: 'none', fontSize: '0.75rem', cursor: 'pointer', textAlign: 'left', color: '#f87171' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
                   onMouseLeave={(e) => (e.currentTarget.style.background = 'none')}
                   onClick={() => handleDeleteCue(contextMenu.segmentIndex, contextMenu.x, contextMenu.y)}
                 >
@@ -1203,24 +1264,25 @@ export function WaveformViewer({
                   top: `${deleteConfirm.y}px`,
                   transform: 'translate(-50%, -100%)',
                   marginTop: '-8px',
-                  background: '#fff',
-                  border: '1px solid #080808',
+                  background: '#1a2030',
+                  border: '1px solid rgba(255,255,255,0.12)',
                   borderRadius: 6,
-                  boxShadow: '4px 4px 0 rgba(0,0,0,0.1)',
+                  boxShadow: '4px 4px 0 rgba(0,0,0,0.3)',
                   padding: 16,
+                  color: '#edf2ff',
                   zIndex: 50,
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                <p style={{ fontSize: '0.8rem', fontFamily: 'var(--pl-font-mono)', marginBottom: 12 }}>Delete this cue?</p>
+                <p style={{ fontSize: '0.8rem', fontFamily: '"IBM Plex Mono", monospace', marginBottom: 12 }}>Delete this cue?</p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button className="btn-pill" style={{ height: 28, fontSize: '0.65rem' }} onClick={() => setDeleteConfirm(null)}>
                     Cancel
                   </button>
                   <button
                     style={{
-                      height: 28, padding: '0 12px', border: '1px solid #c00', borderRadius: 100,
-                      background: '#c00', color: '#fff', fontSize: '0.65rem', fontWeight: 800,
+                      height: 28, padding: '0 12px', border: '1px solid #f87171', borderRadius: 100,
+                      background: '#f87171', color: '#fff', fontSize: '0.65rem', fontWeight: 800,
                       textTransform: 'uppercase', cursor: 'pointer',
                     }}
                     onClick={() => {

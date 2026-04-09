@@ -68,11 +68,11 @@ export function AddItemCombobox({
             flex: 1,
             padding: '6px 10px',
             fontSize: '0.7rem',
-            fontFamily: 'var(--pl-font-mono)',
-            border: '1px solid #080808',
+            fontFamily: '"IBM Plex Mono", monospace',
+            border: '1px solid rgba(255,255,255,0.12)',
             borderRadius: 6,
-            background: '#fff',
-            color: '#080808',
+            background: 'rgba(255,255,255,0.06)',
+            color: '#edf2ff',
             outline: 'none',
           }}
         />
@@ -93,10 +93,10 @@ export function AddItemCombobox({
           zIndex: 50,
           width: '100%',
           marginTop: 4,
-          background: '#fff',
-          border: '1px solid #080808',
+          background: '#161d2a',
+          border: '1px solid rgba(255,255,255,0.12)',
           borderRadius: 6,
-          boxShadow: '4px 4px 0 rgba(0,0,0,0.1)',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
           maxHeight: 192,
           overflowY: 'auto',
         }}>
@@ -106,11 +106,12 @@ export function AddItemCombobox({
               style={{
                 padding: '6px 10px',
                 fontSize: '0.7rem',
-                fontFamily: 'var(--pl-font-mono)',
+                fontFamily: '"IBM Plex Mono", monospace',
                 cursor: 'pointer',
+                color: '#edf2ff',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#F0F0F0')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = '#fff')}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(255,255,255,0.08)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               onMouseDown={(e) => {
                 e.preventDefault()
                 handleSuggestionClick(suggestion)

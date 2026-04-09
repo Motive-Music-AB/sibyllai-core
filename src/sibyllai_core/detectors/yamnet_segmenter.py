@@ -189,9 +189,20 @@ def extract_instruments(audio_data, sr=16000, top_n=5):
     yamnet_model, class_names = _load_yamnet()
 
     # Build instrument index map
+    # Non-instrument classes that match instrument keywords but should be excluded
+    _BLOCKLIST = {
+        'speech', 'speech music', 'speech synthesizer', 'narration',
+        'hubbub', 'babble', 'conversation', 'monologue',
+        'crowd', 'chatter', 'children shouting',
+        'bass fishing',  # not an instrument
+    }
+
     instrument_indices = {}
     for instrument_name in class_names:
         lower_name = instrument_name.lower()
+        # Skip blocked non-instrument classes
+        if any(blocked in lower_name for blocked in _BLOCKLIST):
+            continue
         # Check if this class name contains instrument or vocal keywords
         if any(keyword in lower_name for keyword in [
             # Instruments
@@ -199,9 +210,9 @@ def extract_instruments(audio_data, sr=16000, top_n=5):
             'trumpet', 'saxophone', 'flute', 'clarinet', 'trombone',
             'cello', 'bass', 'harp', 'organ', 'accordion', 'harmonica',
             'synthesizer', 'keyboard', 'percussion',
-            # Vocals
+            # Vocals (intentional — singing is a musical element)
             'singing', 'humming', 'vocal', 'choir', 'rapping', 'chant',
-            'speech', 'whistling', 'beatbox'
+            'whistling', 'beatbox',
         ]):
             idx = class_names.index(instrument_name)
             instrument_indices[instrument_name] = idx

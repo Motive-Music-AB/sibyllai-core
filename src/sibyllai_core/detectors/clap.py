@@ -5,7 +5,10 @@ import librosa
 _clap = None
 _text_embeddings = None
 
-# Comprehensive tag taxonomy organized by category (37 tags total)
+# Comprehensive tag taxonomy organized by category (37 tags total).
+# Each tag is either a plain string (used as both label and CLAP prompt)
+# or a (label, prompt) tuple where the prompt is a more descriptive phrase
+# that CLAP matches more accurately against audio embeddings.
 CLAP_TAG_CATEGORIES = {
     "genre": [
         "orchestral",
@@ -16,17 +19,17 @@ CLAP_TAG_CATEGORIES = {
         "classical",
         "minimalist",
         "ambient",
-        "cinematic percussion"
+        "cinematic percussion",
     ],
     "instrumentation": [
-        "brass section",
-        "string ensemble",
-        "woodwinds",
-        "choir vocals",
-        "piano keys",
-        "guitar bass",
-        "synthesizers",
-        "full orchestra"
+        ("brass section", "cinematic brass"),
+        ("string ensemble", "string ensemble"),
+        ("woodwinds", "woodwinds playing"),
+        ("choir vocals", "choir vocals singing"),
+        ("piano keys", "piano keys"),
+        ("guitar bass", "guitar bass"),
+        ("synthesizers", "synthesizers"),
+        ("full orchestra", "strings and brass orchestra"),
     ],
     "production": [
         "polished production",
@@ -34,7 +37,7 @@ CLAP_TAG_CATEGORIES = {
         "vintage sound",
         "modern production",
         "acoustic recording",
-        "heavily processed"
+        "heavily processed",
     ],
     "energy": [
         "high energy",
@@ -42,24 +45,34 @@ CLAP_TAG_CATEGORIES = {
         "building tension",
         "climactic",
         "gentle",
-        "aggressive"
+        "aggressive",
     ],
     "era": [
         "retro",
         "futuristic",
         "timeless",
-        "modern"
+        "modern",
     ],
     "function": [
         "action sequence",
         "dramatic underscore",
         "theme music",
-        "transitional"
-    ]
+        "transitional",
+    ],
 }
 
-# Flatten tags for embedding (preserves order by category)
-_ALL_TAGS = [tag for category in CLAP_TAG_CATEGORIES.values() for tag in category]
+
+def _resolve_tag(tag):
+    """Return (display_label, clap_prompt) for a tag entry."""
+    if isinstance(tag, tuple):
+        return tag
+    return (tag, tag)
+
+
+# Flatten: extract (label, prompt) pairs preserving order by category.
+# _ALL_PROMPTS are sent to CLAP; _ALL_LABELS are used for output keys.
+_ALL_LABELS = [_resolve_tag(tag)[0] for category in CLAP_TAG_CATEGORIES.values() for tag in category]
+_ALL_PROMPTS = [_resolve_tag(tag)[1] for category in CLAP_TAG_CATEGORIES.values() for tag in category]
 
 
 def tag_chunk(chunk, sr: int) -> dict[str, dict[str, float]]:
@@ -74,6 +87,7 @@ def tag_chunk(chunk, sr: int) -> dict[str, dict[str, float]]:
         Dictionary organized by category:
         {
             "genre": {"orchestral": 0.89, "electronic": 0.45, ...},
+            "instrumentation": {"brass section": 0.32, ...},
             "production": {"polished production": 0.68, ...},
             "energy": {"building tension": 0.76, ...},
             "era": {"timeless": 0.54, ...},
@@ -87,8 +101,8 @@ def tag_chunk(chunk, sr: int) -> dict[str, dict[str, float]]:
         import laion_clap
         _clap = laion_clap.CLAP_Module(enable_fusion=False)
         _clap.load_ckpt()
-        # Pre-compute text embeddings once (performance optimization)
-        _text_embeddings = _clap.get_text_embedding(_ALL_TAGS)
+        # Pre-compute text embeddings using descriptive prompts (performance optimization)
+        _text_embeddings = _clap.get_text_embedding(_ALL_PROMPTS)
 
     # Resample to 48kHz if needed (CLAP requirement)
     if sr != 48_000:
@@ -104,13 +118,14 @@ def tag_chunk(chunk, sr: int) -> dict[str, dict[str, float]]:
     text_norms = np.linalg.norm(_text_embeddings, axis=1) + eps
     similarities = (audio_emb @ _text_embeddings.T) / (audio_norm * text_norms)
 
-    # Organize results by category
+    # Organize results by category, using display labels as keys
     result = {}
     tag_idx = 0
     for category, tags in CLAP_TAG_CATEGORIES.items():
         result[category] = {}
         for tag in tags:
-            result[category][tag] = float(similarities[tag_idx])
+            label, _ = _resolve_tag(tag)
+            result[category][label] = float(similarities[tag_idx])
             tag_idx += 1
 
     return result

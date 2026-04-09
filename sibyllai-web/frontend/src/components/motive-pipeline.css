@@ -1002,3 +1002,49 @@
   display: flex;
   flex-direction: column;
 }
+
+/* ---------------------------------------------------------------------------
+   DARK STUDIO THEME OVERRIDES — WaveformViewer inside FileAnalysis
+   --------------------------------------------------------------------------- */
+.dark-studio .wv-root {
+  background: transparent;
+}
+
+.dark-studio .wv-body {
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark-studio .btn-pill {
+  background: rgba(255, 255, 255, 0.06);
+  color: #edf2ff;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.dark-studio .btn-pill:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #edf2ff;
+}
+
+.dark-studio .btn-pill.primary {
+  background: rgba(255, 255, 255, 0.14);
+  color: #edf2ff;
+}
+
+.dark-studio .btn-pill.primary:hover {
+  background: rgba(255, 255, 255, 0.2);
+  color: #edf2ff;
+}
+
+.dark-studio .btn-pill:disabled {
+  opacity: 0.3;
+}
+
+.dark-studio .btn-pill:disabled:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #edf2ff;
+}
+
+.dark-studio .btn-pill.primary:disabled:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #edf2ff;
+}

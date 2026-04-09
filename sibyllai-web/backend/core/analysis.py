@@ -186,6 +186,8 @@ def analyze_segments(
                 if progress_callback:
                     progress_callback(base_step + 5, total_steps, f"Segment {segment_num}: Analyzing style")
                 clap_categorized = tag_chunk(music_mono, sr)
+                print(f"[DEBUG] CLAP returned {len(clap_categorized)} categories for segment {segment_num}: "
+                      f"{', '.join(f'{k}({len(v)})' for k, v in clap_categorized.items())}")
 
                 # Extract top tags per category
                 top_tags = []
@@ -197,7 +199,9 @@ def analyze_segments(
                 clap_top_overall = sorted(top_tags, key=lambda x: x[1], reverse=True)[:5]
 
             except Exception as e:
-                print(f"[WARNING] CLAP analysis failed for segment {segment_num}: {e}")
+                import traceback
+                print(f"[ERROR] CLAP analysis failed for segment {segment_num}: {e}")
+                traceback.print_exc()
 
             # Key detection
             try:
@@ -236,8 +240,8 @@ def analyze_segments(
 
             # Structure detection (internal sections within this cue)
             sections_data = []
-            min_section_length = 8.0
             cue_duration = end - start
+            min_section_length = 8.0
             try:
                 if cue_duration >= min_section_length * 2:
                     sections = detect_sections_with_fallback(
