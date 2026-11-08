@@ -1,12 +1,8 @@
 # SibyllAI Core
 
-**Status: 🚧 Work in Progress — Not fully working yet!**
+**Status: MVP backend complete. Web UI in active development.**
 
-This repository contains the core engine for Motive-AI, an audio-spotting and mood-analysis tool designed to assist with film-music spotting, emotion mapping, and intelligent cue suggestions. The project is under active development and is being refactored for improved modularity and maintainability. 
-
-**Note:**
-- The codebase is not yet fully functional. Some features may be incomplete or broken.
-- Please check back for updates as development progresses.
+This repository contains the core engine for Motive-AI, an audio-spotting and music analysis tool designed to assist with film-music spotting, emotion mapping, and intelligent cue suggestions. The backend has been tested on production files (89-minute feature film MX).
 
 ---
 
@@ -31,26 +27,36 @@ This repository contains the core engine for Motive-AI, an audio-spotting and mo
 ## Tech Stack
 - **Python 3.11+**
 - **PyTorch** (deep learning, model inference)
-- **TensorFlow & Keras** (legacy and some model support)
-- **Hydra** (configuration management)
-- **Gradio** (demo UI)
+- **TensorFlow & Keras** (for YAMNet)
 - **Librosa, SoundFile, Essentia** (audio processing)
-- **YAMNet** (music/speech segmentation)
-- **Demucs** (music source separation, experimental)
-- **pytorch-lightning** (training pipeline)
+- **YAMNet** (music cue segmentation + instrument/genre detection from 521 audio classes)
+- **LAION-CLAP** (37 categorized tags: genre, production, energy, era, function, instrumentation)
+- **Music2Emo** (mood/emotion: valence, arousal, mood tags)
+- **Hydra** (configuration for Music2Emo)
+- **FastAPI + Vite/React** (web UI)
 - **Other ML/DS libraries:** scikit-learn, pandas, numpy, etc.
 
 ## Project Structure
 ```
-src/
-  sibyllai_core/
-    cli.py           # Command-line interface
-    pipeline.py      # Main analysis pipeline
-    detectors/       # Audio/music feature detectors (e.g., AST, CLAP, YAMNet)
-    markers/         # Marker and export utilities
-    thirdparty/
-      music2emo/     # Integrated and modified Music2Emo package
-        ...          # (models, utils, configs, etc.)
+src/sibyllai_core/
+  cli.py                  # Command-line interface
+  pipeline.py             # Legacy CLI pipeline (outdated)
+  sibyl_format.py         # .sibyl.json project file builder
+  detectors/
+    yamnet_segmenter.py   # Cue segmentation + instrument/genre detection
+    clap.py               # 37-tag CLAP analysis
+    ast.py                # Music probability (AST model)
+    m2e_wrapper.py        # Music2Emo mood wrapper
+    chord_detector.py     # Key detection
+  thirdparty/
+    music2emo/            # Integrated Music2Emo package
+
+sibyllai-web/
+  backend/
+    api/main.py           # FastAPI endpoints
+    core/analysis.py      # Active analysis pipeline (no Demucs)
+    core/segmentation.py  # YAMNet segmentation
+  frontend/               # Vite/React web UI
 ```
 - **examples/data/**: Example audio/video files for testing
 - **outputs/**: Default output directory for CLI results
@@ -59,70 +65,26 @@ src/
 
 ## Detailed Code-Level Flow
 
-1. **CLI Entry**
-   - **File:** `src/sibyllai_core/cli.py`
-   - **Function:** `main()`
-   - **What it does:**
-     - Parses arguments with `build_parser()`
-     - Calls `analyse()` from `pipeline.py`
-     - Example:
-       ```python
-       def main(argv=None):
-           args = build_parser().parse_args(argv)
-           analyse(pathlib.Path(args.src), pathlib.Path(args.out), args.thr, args.fps)
-       ```
+The active pipeline lives in `sibyllai-web/backend/core/analysis.py`. The root-level `pipeline.py` is a legacy CLI version that is not kept in sync.
 
-2. **Pipeline Orchestration**
-   - **File:** `src/sibyllai_core/pipeline.py`
-   - **Function:** `analyse(src: Path, out: Path, thr: float, fps: int)`
-   - **What it does:**
-     - Loads the input file (audio/video)
-     - Calls detector modules (see below)
-     - Aggregates results
-     - Calls marker/export utilities
-     - Writes output files to `out` directory
+1. **Segmentation** (`core/segmentation.py`)
+   - ffmpeg extracts audio from video/audio input
+   - YAMNet `segment_music_regions()` returns (start, end) tuples
+   - Segments shorter than 3 seconds are skipped
 
-3. **Detectors**
-   - **Folder:** `src/sibyllai_core/detectors/`
-   - **Files/Functions:**
-     - `yamnet_segmenter.py` — e.g., `YAMNetSegmenter.analyse()` (music/speech segmentation)
-     - `ast.py` — e.g., `ASTDetector.analyse()`
-     - `clap.py` — e.g., `CLAPDetector.analyse()`
-     - `m2e_wrapper.py` — e.g., `global_moods()`
-   - **What they do:**
-     - Each provides a function or class to analyze the input and return features or predictions.
+2. **Per-segment analysis** (`core/analysis.py:analyze_segments()`)
+   - **BPM** — Essentia `RhythmExtractor2013`
+   - **Instruments** — YAMNet `extract_instruments()`, top 15 from 521 audio classes
+   - **Genre** — YAMNet `extract_genres()`, top 10
+   - **Music probability** — AST model
+   - **Style/energy/era/function/instrumentation** — CLAP `tag_chunk()`, 37 categorized tags
+   - **Key** — `chord_detector.analyze_chords()`
+   - **Mood/valence/arousal** — Music2Emo `global_moods()` (run last; most fragile)
 
-4. **Source Separation (Experimental)**
-   - **Demucs** is used to separate music from other stems before mood analysis. This step is experimental and may not be fully stable yet.
-
-5. **Music2Emo Integration**
-   - **File:** `src/sibyllai_core/detectors/m2e_wrapper.py`
-   - **Function:** `global_moods(wav_path: str, threshold: float = 0.5)`
-   - **What it does:**
-     - Instantiates `Music2emo` from `thirdparty/music2emo/music2emo.py`
-     - Calls `.predict()` on the input file
-     - Returns a dictionary with valence, arousal, and mood tags
-
-6. **Music2Emo Model**
-   - **File:** `src/sibyllai_core/thirdparty/music2emo/music2emo.py`
-   - **Class:** `Music2emo`
-   - **Function:** `predict(audio: str, threshold: float = 0.5) -> dict`
-   - **What it does:**
-     - Loads model weights
-     - Extracts features from audio
-     - Runs inference and returns predictions
-
-7. **Markers and Export**
-   - **File:** `src/sibyllai_core/markers/export.py`
-   - **Function:** e.g., `export_markers(results, out_path)`
-   - **What it does:**
-     - Takes results from detectors/pipeline
-     - Writes marker files or other outputs
-
-8. **Output**
-   - **Directory:** `outputs/` (or as specified by `--out`)
-   - **What's written:**
-     - Marker files, analysis results, logs, etc.
+3. **Output** (`sibyl_format.py`)
+   - `create_cue()` builds per-cue data with `musical_profile` + `project_context`
+   - `save_project()` writes `project.sibyl.json`
+   - Backwards-compatible `music_segments.csv` also written
 
 ---
 
@@ -130,16 +92,16 @@ src/
 
 ```mermaid
 flowchart TD
-    CLI["cli.py<br/>main()"] -->|parse args| Pipeline["pipeline.py<br/>analyse()"]
-    Pipeline -->|calls| YAMNet["detectors/yamnet_segmenter.py<br/>YAMNetSegmenter.analyse()"]
-    Pipeline -->|calls| AST["detectors/ast.py<br/>ASTDetector.analyse()"]
-    Pipeline -->|calls| CLAP["detectors/clap.py<br/>CLAPDetector.analyse()"]
-    Pipeline -->|calls| Demucs["demucs<br/>(source separation, experimental)"]
-    Pipeline -->|calls| M2E["detectors/m2e_wrapper.py<br/>global_moods()"]
-    M2E -->|calls| Music2Emo["thirdparty/music2emo/music2emo.py<br/>Music2emo.predict()"]
-    Pipeline -->|calls| Markers["markers/export.py<br/>export_markers()"]
-    Pipeline -->|writes| Output["outputs/<br/>(results, markers, etc.)"]
-    CLI -->|input| Examples["examples/data/<br/>short_clip.wav"]
+    Input["Audio / Video Input"] --> Seg["core/segmentation.py<br/>segment_music_regions()"]
+    Seg -->|"(start,end) tuples"| Analysis["core/analysis.py<br/>analyze_segments()"]
+    Analysis --> BPM["Essentia<br/>BPM"]
+    Analysis --> YAMNet["detectors/yamnet_segmenter.py<br/>instruments + genres"]
+    Analysis --> AST["detectors/ast.py<br/>music probability"]
+    Analysis --> CLAP["detectors/clap.py<br/>37 categorized tags"]
+    Analysis --> Chord["detectors/chord_detector.py<br/>key detection"]
+    Analysis --> M2E["detectors/m2e_wrapper.py<br/>mood / valence / arousal"]
+    Analysis -->|cues| SibylFormat["sibyl_format.py<br/>create_project()"]
+    SibylFormat -->|writes| Output["outputs/run_NNN/<br/>project.sibyl.json + music_segments.csv"]
 ```
 
 ---

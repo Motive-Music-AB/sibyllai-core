@@ -6,7 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 SibyllAI Core is a music analysis tool for film composers, designed to analyze temp music (MX) tracks and extract comprehensive musical characteristics. The primary use case is **pre-scoring analysis**: composers receive temp MX from editors and use SibyllAI to understand what musical elements (genre, instrumentation, mood, energy) the director responded to, informing their original compositions.
 
-**Current Status:** MVP backend complete and tested on production files (89-minute feature film MX). Ready for web UI development.
+**Current Status:** MVP backend complete and tested on production files (89-minute feature film MX). Web UI in active development (`sibyllai-web/`).
+
+**Active pipeline:** `sibyllai-web/backend/core/analysis.py` — this is the current, maintained pipeline. The root-level `src/sibyllai_core/pipeline.py` is a legacy CLI version and is not kept in sync.
 
 **Future Vision:** Reverse lookup capability - match detected musical profiles against composer's personal music library to suggest similar unused tracks/demos.
 
@@ -16,7 +18,7 @@ SibyllAI Core is a music analysis tool for film composers, designed to analyze t
 - PyTorch 2.2.2 (pinned for compatibility; has known RCE vulnerability via torch.load - only use trusted model files)
 - TensorFlow & Keras (for YAMNet)
 - YAMNet (music cue segmentation + instrument detection from 521 audio event classes)
-- CLAP (LAION-CLAP for genre, production style, energy, era classification - 25-30 categorized tags)
+- CLAP (LAION-CLAP for genre, production style, energy, era, function, instrumentation - 37 categorized tags)
 - Music2Emo (mood/emotion analysis: valence, arousal, mood tags)
 - Essentia (rhythm/BPM extraction)
 - Librosa (audio processing, resampling)
@@ -96,8 +98,9 @@ The system follows a sequential processing pipeline:
 4. **Feature Analysis** (per detected cue):
    - **BPM Analysis**: Uses Essentia RhythmExtractor2013
    - **Key Detection**: Analyzes harmonic content
-   - **Instrument Detection**: Extracts top 3-5 instruments from YAMNet's 521 audio event classes
-   - **Genre/Style Tags**: CLAP analysis across 25-30 categorized tags (genre, production, energy, era, function)
+   - **Instrument Detection**: YAMNet `extract_instruments()`, top 15 from 521 audio event classes
+   - **Genre Detection**: YAMNet `extract_genres()`, top 10
+   - **Style/Energy/Era/Function/Instrumentation Tags**: CLAP `tag_chunk()` across 37 categorized tags
    - **Mood Analysis**: Music2Emo model for valence, arousal, and mood tags
 
 5. **Output Generation**:
