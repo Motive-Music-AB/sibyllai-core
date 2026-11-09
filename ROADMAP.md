@@ -15,50 +15,42 @@ A simple tool for film composers to analyze temp MX tracks and export cue marker
 
 ---
 
-## What Already Exists (Backend)
+## Backend — Complete ✅
+
+All analysis runs through `sibyllai-web/backend/core/analysis.py`. Tested on 89-minute feature film MX (73 cues detected, ~7 min processing time).
 
 | Feature | Status | Notes |
 |---|---|---|
 | Audio ingestion | ✅ Done | ffmpeg extracts audio from video or audio files |
-| Music cue detection | ✅ Done | YAMNet segments music vs silence/dialogue |
-| Timecode extraction | ✅ Done | `_tc()` converts seconds → HH:MM:SS:FF |
+| Music cue detection | ✅ Done | YAMNet `segment_music_regions()` |
+| Timecode extraction | ✅ Done | HH:MM:SS:FF conversion |
 | BPM detection | ✅ Done | Essentia `RhythmExtractor2013` |
-| Key detection | ✅ Done | Chord detector (key only) |
-| Genre / mood tags | ✅ Done | CLAP (37 categorized tags) |
+| Key detection | ✅ Done | `chord_detector.analyze_chords()` |
+| Instrument detection | ✅ Done | YAMNet `extract_instruments()`, top 15 |
+| Genre detection | ✅ Done | YAMNet `extract_genres()`, top 10 |
+| Style / energy / era / function tags | ✅ Done | CLAP, 37 categorized tags |
 | Mood / valence / arousal | ✅ Done | Music2Emo |
-| Instrument detection | ✅ Done | YAMNet `extract_instruments()` |
-| CSV output | ✅ Done | `music_segments.csv` per run |
-| .sibyl.json output | ✅ Done | Structured project format |
+| `.sibyl.json` output | ✅ Done | `musical_profile` + `project_context` per cue |
+| CSV output | ✅ Done | Backwards-compatible `music_segments.csv` |
 
-## What Needs to Be Built
+## Web UI — In Progress 🔄
 
-### 1. UI — Drag & Drop Interface
-- Drag-and-drop audio file input
-- Gradio is already installed and is the simplest path
-- Alternatively: simple web UI (FastAPI + minimal HTML)
+Built with FastAPI (port 8003) + Vite/React (port 5174). Core upload/analyze/display flow is functional. Lives in `sibyllai-web/`.
 
-### 2. Results View
-- Display detected cues in a table: cue #, start TC, end TC, duration, BPM, key, top tags
-- Show confidence scores where useful
-
-### 3. Selectable Export Fields
-- Checkboxes or toggles for which columns to include in CSV
-- Minimum useful set for Logic Pro: cue name, start timecode
-
-### 4. Logic Pro–Compatible CSV Export
-- Logic Pro marker import format needs to be confirmed
-- Likely requires: Position (timecode or SMPTE), Name/Label columns
-- May need specific delimiter or header format
-
-### 5. macOS Packaging (post-MVP)
-- Wrap as a standalone macOS app or local web server
-- Models are large — consider download-on-first-run approach
+| Feature | Status | Notes |
+|---|---|---|
+| File upload (drag & drop) | ✅ Done | |
+| Waveform display + zoom | ✅ Done | WaveSurfer.js, complex zoom logic — do not simplify |
+| Segment detection preview | ✅ Done | Select/deselect cues before analysis |
+| Cue cards with analysis results | ✅ Done | Genre, style, instruments, BPM, key, mood |
+| Playback with cue navigation | ✅ Done | Spacebar from cue start; click to scrub |
+| Selectable export fields | ⬜ To do | Checkboxes for which columns to include |
+| Logic Pro–compatible CSV export | ⬜ To do | Format TBD — needs confirmed LP marker spec |
+| macOS packaging | ⬜ Post-MVP | Local server or Electron wrapper |
 
 ---
 
 ## Open Questions
 
 - What is Logic Pro's exact marker CSV format? (column names, timecode format, delimiter)
-- Should cue detection use YAMNet (full mix with dialogue) or amplitude detection (clean MX only)?
-- Which analysis fields are most useful to composers? (BPM and key are likely essential; mood/valence optional)
-- Should Music2Emo and AST remain in MVP, or simplify to CLAP + Essentia only for speed?
+- Which analysis fields are most useful to composers for the export? (BPM and key are likely essential; mood/valence optional)
